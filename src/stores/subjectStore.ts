@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { logger } from '../lib/logger'
 import { generateId } from '../lib/id'
+import { useAiStore } from './aiStore'
+import { useNoteStore } from './noteStore'
 
 export interface Subject {
   id: string
@@ -27,6 +29,7 @@ interface SubjectState {
 
   addSubject: (name: string) => string
   removeSubject: (id: string) => void
+  renameSubject: (id: string, newName: string) => void
   setCurrentSubject: (id: string | null) => void
   getCurrentSubject: () => Subject | null
   detectSubject: (content: string) => string | null
@@ -59,6 +62,39 @@ export const useSubjectStore = create<SubjectState>((set, get) => ({
     set((state) => ({
       subjects: state.subjects.filter((s) => s.id !== id),
       currentSubjectId: state.currentSubjectId === id ? null : state.currentSubjectId,
+    }))
+    // 清理关联的会话（将 subjectId 改为 'main'）
+    try {
+      const aiState = useAiStore.getState()
+      for (const [sid, session] of Object.entries(aiState.sessions)) {
+        if (session.subjectId === id) {
+          useAiStore.setState((s) => ({
+            sessions: {
+              ...s.sessions,
+              [sid]: { ...session, subjectId: 'main' },
+            },
+          }))
+        }
+      }
+      aiState.saveToStorage()
+    } catch { /* aiStore may not be initialized */ }
+    // 清理关联的笔记（将 subjectId 改为 null）
+    try {
+      const noteState = useNoteStore.getState()
+      for (const note of noteState.notes) {
+        if (note.subjectId === id) {
+          noteState.updateNote(note.id, { subjectId: null })
+        }
+      }
+    } catch { /* noteStore may not be initialized */ }
+    get().saveToStorage()
+  },
+
+  renameSubject: (id, newName) => {
+    set((state) => ({
+      subjects: state.subjects.map((s) =>
+        s.id === id ? { ...s, name: newName, updatedAt: Date.now() } : s
+      ),
     }))
     get().saveToStorage()
   },

@@ -1,5 +1,7 @@
 # 问渠 - 学生学习助手
 
+> GitHub: https://github.com/JJJJJacobbbbb/wenqu
+
 一款基于 Electron + React 的桌面学习助手，集成文档阅读、AI 对话、笔记管理等功能，支持悬浮窗模式。
 
 ## 功能特性

@@ -13,7 +13,7 @@ interface ChatInputProps {
 
 export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps = {}) {
   const [input, setInput] = useState('')
-  const { sendMessage, getActiveSession, stopGeneration, pendingScreenshots, addPendingScreenshot, removePendingScreenshot, clearPendingScreenshots, thinkingMode, setThinkingMode } = useAiStore()
+  const { sendMessage, getActiveSession, stopGeneration, pendingScreenshots, addPendingScreenshot, removePendingScreenshot, clearPendingScreenshots, thinkingMode, setThinkingMode, messageDropped } = useAiStore()
   const { apiConfigs, setDefaultModel, getActiveModelForModality } = useSettingsStore()
   const { selectionMode, toggleSelectionMode } = useDocumentStore()
   const session = getActiveSession()
@@ -81,7 +81,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
     const trimmed = input.trim()
     const screens = pendingScreenshotsRef.current
     if ((!trimmed && screens.length === 0) || isGenerating) return
-    sendMessage(trimmed || '请分析截图', screens.length > 0 ? screens : undefined, false)
+    sendMessage(trimmed || '请分析截图', screens.length > 0 ? screens : undefined)
     setInput('')
     clearPendingScreenshots()
     if (audioPreviewRef.current?.url) URL.revokeObjectURL(audioPreviewRef.current.url)
@@ -116,6 +116,8 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
       setIsRecording(true)
       const result = await recorder.start()
       if (result.text) setInput((prev) => prev + result.text)
+      // 释放旧的音频 URL
+      if (audioPreviewRef.current?.url) URL.revokeObjectURL(audioPreviewRef.current.url)
       const preview = { url: result.audioUrl, blob: result.audioBlob }
       audioPreviewRef.current = preview
       setAudioPreview(preview)
@@ -217,6 +219,13 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
         </div>
       )}
 
+      {/* 消息丢弃提示 */}
+      {messageDropped && (
+        <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+          上一条消息正在处理中，请稍候再发送
+        </div>
+      )}
+
       {/* 输入框 */}
       <textarea
         ref={textareaRef}
@@ -253,17 +262,30 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
                 ) : (
                   allModels.map((m) => {
                     const isActive = activeModel?.model.id === m.modelId
+                    const config = apiConfigs.find((c) => c.id === m.configId)
+                    const model = config?.models.find((mdl) => mdl.id === m.modelId)
+                    const modalities = model?.modalities || []
                     return (
                       <button
                         key={m.modelId}
-                        onClick={() => { setDefaultModel('vision', m.modelId); setModelOpen(false) }}
+                        onClick={() => {
+                          if (modalities.length === 0) return
+                          const modality = modalities[0]
+                          setDefaultModel(modality, m.modelId)
+                          setModelOpen(false)
+                        }}
                         className={`w-full px-3 py-1.5 text-left text-xs flex items-center justify-between transition-colors ${
-                          isActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'
+                          isActive ? 'bg-blue-50 text-blue-700' : modalities.length === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-50'
                         }`}
+                        disabled={modalities.length === 0}
                       >
                         <div className="min-w-0 flex-1">
                           <span className="truncate block">{m.modelName}</span>
-                          <span className="text-[10px] text-gray-400">{m.configName}</span>
+                          <span className="text-[10px] text-gray-400">
+                            {m.configName}
+                            {modalities.length > 0 && ` · ${modalities.join('/')}`}
+                            {modalities.length === 0 && ' · 未标注模态'}
+                          </span>
                         </div>
                         {isActive && (
                           <svg className="w-3 h-3 text-blue-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">

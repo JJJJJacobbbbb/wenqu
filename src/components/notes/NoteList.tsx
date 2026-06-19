@@ -8,7 +8,7 @@ import WinControls from '../shared/WinControls'
 
 export default function NoteList() {
   const {
-    notes, filterType, filterSubjectId, searchQuery,
+    notes, filterType, filterSubjectId, filterCategory, searchQuery,
     setFilter, setSearchQuery, getFilteredNotes,
   } = useNoteStore()
   const { subjects } = useSubjectStore()
@@ -16,7 +16,7 @@ export default function NoteList() {
 
   const [showExportMenu, setShowExportMenu] = useState(false)
 
-  const filteredNotes = useMemo(() => getFilteredNotes(), [notes, filterType, filterSubjectId, searchQuery])
+  const filteredNotes = useMemo(() => getFilteredNotes(), [notes, filterType, filterSubjectId, filterCategory, searchQuery])
 
   // 统计
   const stats = useMemo(() => {
@@ -79,7 +79,7 @@ export default function NoteList() {
         className="bg-white border-b border-gray-200 shrink-0 select-none"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <div className="h-10 flex items-center justify-between px-4">
+        <div className="h-10 flex items-center justify-between pl-4">
           <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <button
               onClick={collapseNotes}

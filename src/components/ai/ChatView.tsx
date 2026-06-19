@@ -30,7 +30,7 @@ export default function ChatView({
   const { getActiveSession, clearError, createSession, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore()
   const { currentSubjectId, subjects } = useSubjectStore()
   const { generateNote, addNote, mergeNote } = useNoteStore()
-  const { hasModelWithModality } = useSettingsStore()
+  const { hasModelWithModality, apiConfigs } = useSettingsStore()
   const session = getActiveSession()
 
   const [showHistory, setShowHistory] = useState(false)
@@ -51,6 +51,11 @@ export default function ChatView({
       createSession()
     }
   }, [])
+
+  // 切换会话时关闭相似笔记弹窗
+  useEffect(() => {
+    setSimilarDialog(null)
+  }, [activeSessionId])
 
 
   const sessions = useMemo(() => {
@@ -107,10 +112,10 @@ export default function ChatView({
     }
   }, [session, currentSubjectId, generateNote, addNote])
 
-  const hasAiModel = hasModelWithModality('vision') || hasModelWithModality('document') || (() => {
-    const { apiConfigs } = useSettingsStore.getState()
-    return apiConfigs.some(c => c.models.length > 0)
-  })()
+  const hasAiModel = useMemo(() =>
+    hasModelWithModality('vision') || hasModelWithModality('document') || apiConfigs.some(c => c.models.length > 0),
+    [hasModelWithModality, apiConfigs]
+  )
 
   const handleMerge = useCallback(async () => {
     if (!similarDialog) return

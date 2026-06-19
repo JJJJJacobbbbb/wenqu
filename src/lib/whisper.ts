@@ -162,6 +162,14 @@ export function recordAndTranscribe(
   const stop = () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
       mediaRecorder.stop()
+    } else {
+      // MediaRecorder 未在录音状态，直接清理流
+      stream?.getTracks().forEach((t) => t.stop())
+      stream = null
+      if (active) {
+        active = false
+        rejectFn?.(new Error('录音已取消'))
+      }
     }
   }
 

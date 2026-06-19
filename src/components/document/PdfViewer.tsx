@@ -153,18 +153,44 @@ export default function PdfViewer({ content }: PdfViewerProps) {
   useEffect(() => {
     if (loading || pages.length === 0 || !containerRef.current) return
 
+    const visiblePages = new Set<number>()
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
+          const idx = Number((entry.target as HTMLElement).dataset.pageIndex)
+          if (isNaN(idx)) continue
+
           if (entry.isIntersecting) {
-            const idx = Number((entry.target as HTMLElement).dataset.pageIndex)
-            if (!isNaN(idx)) {
-              for (let d = -BUFFER_PAGES; d <= BUFFER_PAGES; d++) {
-                renderPage(idx + d)
-              }
+            visiblePages.add(idx)
+            // 预渲染附近页面
+            for (let d = -BUFFER_PAGES; d <= BUFFER_PAGES; d++) {
+              renderPage(idx + d)
             }
+          } else {
+            visiblePages.delete(idx)
           }
         }
+
+        // 释放远离视口的页面，节省内存
+        const minVisible = Math.min(...visiblePages)
+        const maxVisible = Math.max(...visiblePages)
+        const RELEASE_DISTANCE = BUFFER_PAGES * 3
+        setPages((prev) => {
+          let changed = false
+          const next = prev.map((p, i) => {
+            if (p.src && (i < minVisible - RELEASE_DISTANCE || i > maxVisible + RELEASE_DISTANCE)) {
+              changed = true
+              return { ...p, src: null }
+            }
+            return p
+          })
+          if (changed) {
+            pagesRef.current = next
+            return next
+          }
+          return prev
+        })
       },
       {
         root: containerRef.current,

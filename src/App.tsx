@@ -25,11 +25,14 @@ function App() {
     loadSessions()
 
     const host = getDesktopHost()
+    let unmounted = false
     let cleanup: (() => void) | undefined
     host.events.listen<string>('navigate-to', (page: string) => {
       if (page === 'settings') openSettings()
-    }).then((cb) => { cleanup = cb }).catch(() => logger.warn('导航事件监听失败'))
-    return () => { cleanup?.() }
+    }).then((cb) => {
+      if (unmounted) { cb() } else { cleanup = cb }
+    }).catch(() => logger.warn('导航事件监听失败'))
+    return () => { unmounted = true; cleanup?.() }
   }, [])
 
   const isNotesActive = activeTabType === 'notes' && !notesCollapsed

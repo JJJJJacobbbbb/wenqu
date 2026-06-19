@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useNoteStore } from '../../stores/noteStore'
@@ -18,10 +18,10 @@ import NoteCard from '../notes/NoteCard'
 export default function DocumentViewer() {
   const { tabs, activeTabId, closeTab, setActiveTab, getActiveDocument, openFile, selectionMode } = useDocumentStore()
   const { openSettings } = useTabStore()
-  const { getFilteredNotes } = useNoteStore()
+  const { getFilteredNotes, notes, filterType, filterSubjectId, filterCategory, searchQuery } = useNoteStore()
 
   const activeDocument = getActiveDocument()
-  const filteredNotes = getFilteredNotes()
+  const filteredNotes = useMemo(() => getFilteredNotes(), [notes, filterType, filterSubjectId, filterCategory, searchQuery])
   const [showNotes, setShowNotes] = useState(false)
   const [notesCollapsed, setNotesCollapsed] = useState(false)
 
@@ -214,7 +214,7 @@ export default function DocumentViewer() {
   return (
     <div className="h-screen flex flex-col relative">
       <header
-        className="h-10 bg-white border-b border-gray-200 flex items-center px-4 justify-between shrink-0 select-none"
+        className="h-10 bg-white border-b border-gray-200 flex items-center pl-4 justify-between shrink-0 select-none"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -336,7 +336,7 @@ export default function DocumentViewer() {
       )}
 
       {showNotes && !notesCollapsed && (
-        <div className="absolute inset-0 z-40 flex">
+        <div className="absolute inset-0 z-40 flex" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <div className="w-96 bg-white border-r border-gray-200 shadow-xl flex flex-col z-10">
             <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
               <h3 className="text-sm font-semibold text-gray-800">笔记</h3>
@@ -387,7 +387,7 @@ export default function DocumentViewer() {
 
           <div
             className="flex-1 bg-black/30 backdrop-blur-sm"
-            onClick={() => { setShowNotes(false); setNotesCollapsed(false) }}
+            onClick={() => setNotesCollapsed(true)}
           />
         </div>
       )}

@@ -133,6 +133,13 @@ function createChatWindow() {
   chatWindow.webContents.on('did-fail-load', () => {
     chatWindowCreating = false
   })
+
+  // 超时保护：10 秒内未 ready 则重置标志，防止死锁
+  setTimeout(() => {
+    if (chatWindowCreating && chatWindow && !chatWindow.isDestroyed()) {
+      chatWindowCreating = false
+    }
+  }, 10000)
   } catch (err) {
     chatWindowCreating = false
     throw err

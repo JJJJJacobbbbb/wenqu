@@ -91,7 +91,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const reader = new FileReader()
       reader.onload = () => {
         const raw = reader.result
-        const content = fileType === 'text' ? new TextDecoder().decode(raw as ArrayBuffer) : raw
+        const content = fileType === 'text' ? (raw as string) : raw
         const id = generateId('doc-tab')
         const tab: DocumentTab = { id, filePath: file.name, fileName: file.name, fileType, content, scrollPosition: 0 }
         loaded++
@@ -103,6 +103,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       reader.onerror = () => {
         logger.error('读取文件失败', file.name)
         loaded++
+        if (loaded === total) {
+          // 所有文件都加载失败，确保 activeTabId 不指向不存在的 tab
+          set((state) => {
+            const currentActive = state.activeTabId
+            const hasTab = currentActive && state.tabs.some((t) => t.id === currentActive)
+            return hasTab ? {} : { activeTabId: state.tabs.length > 0 ? state.tabs[state.tabs.length - 1].id : null }
+          })
+        }
       }
 
       if (fileType === 'text') {

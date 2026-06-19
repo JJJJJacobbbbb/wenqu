@@ -9,13 +9,15 @@ interface MarkdownRendererProps {
 
 const renderer = new marked.Renderer()
 
-renderer.code = function (code: string, infostring: string | undefined, _escaped: boolean) {
-  const language = (infostring || 'text').replace(/[^a-zA-Z0-9_-]/g, '')
-  const escaped = code
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+// marked v12+ 传 token 对象 { text, lang, escaped }，旧版传 (code, infostring, escaped)
+renderer.code = function (args: any) {
+  const text: string = args?.text ?? args ?? ''
+  const lang: string | undefined = args?.lang ?? arguments[1]
+  const language = (lang || 'text').replace(/[^a-zA-Z0-9_-]/g, '')
+  // text 在 v12+ 已预转义，旧版需要手动转义
+  const escaped = typeof args === 'string'
+    ? args.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    : text
   return `<pre><code class="language-${language}">${escaped}</code></pre>`
 }
 
@@ -51,14 +53,25 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (ref.current) {
-      // 1. 先渲染数学公式（避免 marked 拆分 $$...$$ 导致正则失效）
-      const withMath = renderMath(content)
-      // 2. 解析 markdown 为 HTML
-      const rawHtml = marked.parse(withMath) as string
-      // 3. DOMPurify 清除恶意 HTML（KaTeX 输出也被净化）
-      const finalHtml = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['class'] })
-      ref.current.innerHTML = finalHtml
+    if (!ref.current) return
+
+    const withMath = renderMath(content)
+    const result = marked.parse(withMath)
+
+    const render = (html: string) => {
+      if (!ref.current) return
+      const finalHtml = DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'style'] })
+      // 流式更新时避免不必要的 innerHTML 替换，保留用户文本选区
+      if (ref.current.innerHTML !== finalHtml) {
+        ref.current.innerHTML = finalHtml
+      }
+    }
+
+    // marked.parse may return string or Promise<string> depending on version
+    if (typeof result === 'string') {
+      render(result)
+    } else {
+      result.then(render)
     }
   }, [content])
 

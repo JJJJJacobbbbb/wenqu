@@ -2,6 +2,10 @@
   "name": "student-assistant",
   "version": "1.0.0",
   "description": "学生学习助手 - 悬浮球+文档阅读+AI对话",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JJJJacobbbbb/wenqu.git"
+  },
   "main": "dist-electron/main.js",
   "build": {
     "appId": "com.wenqu.student-assistant",

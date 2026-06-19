@@ -14,7 +14,7 @@ export default function SettingsPage() {
   const tabs = [
     { id: 'api' as const, label: 'AI 模型' },
     { id: 'memory' as const, label: '存储管理' },
-    { id: 'subjects' as const, label: '学科管理' },
+    { id: 'subjects' as const, label: '学科添加' },
   ]
 
   return (

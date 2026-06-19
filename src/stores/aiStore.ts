@@ -20,6 +20,7 @@ export interface AiSession {
   subjectId: string
   name: string
   messages: Message[]
+  contextWindow: Message[]  // 当前题目的上下文（用于 API 调用）
   chatState: 'idle' | 'thinking' | 'streaming' | 'error'
   streamingText: string
   error: string | null
@@ -33,6 +34,7 @@ interface AiState {
   abortController: AbortController | null
   pendingScreenshots: string[]
   thinkingMode: boolean
+  messageDropped: boolean
 
   getActiveSession: () => AiSession | null
   createSession: () => string
@@ -40,7 +42,7 @@ interface AiState {
   deleteSession: (sessionId: string) => void
   listSessionsBySubject: (subjectId: string) => AiSession[]
 
-  sendMessage: (content: string, screenshotData?: string | string[], isFollowUp?: boolean) => Promise<void>
+  sendMessage: (content: string, screenshotData?: string | string[]) => Promise<void>
   stopGeneration: () => void
   clearError: (sessionId: string) => void
 
@@ -48,6 +50,7 @@ interface AiState {
   removePendingScreenshot: (index: number) => void
   clearPendingScreenshots: () => void
   setThinkingMode: (on: boolean) => void
+  setMessageDropped: (v: boolean) => void
 
   loadFromStorage: () => void
   saveToStorage: () => void
@@ -68,12 +71,15 @@ function generateSessionName(content: string): string {
   return clean.length > 20 ? clean.slice(0, 20) + '...' : clean
 }
 
+let sendMessageLock = false
+
 export const useAiStore = create<AiState>((set, get) => ({
   sessions: {},
   activeSessionId: null,
   abortController: null,
   pendingScreenshots: [],
   thinkingMode: false,
+  messageDropped: false,
 
   getActiveSession: () => {
     const { sessions, activeSessionId } = get()
@@ -96,6 +102,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       subjectId,
       name: '新会话',
       messages: [],
+      contextWindow: [],
       chatState: 'idle',
       streamingText: '',
       error: null,
@@ -142,7 +149,13 @@ export const useAiStore = create<AiState>((set, get) => ({
       .sort((a, b) => b.updatedAt - a.updatedAt)
   },
 
-  sendMessage: async (content, screenshotData, isFollowUp = false) => {
+  sendMessage: async (content, screenshotData) => {
+    if (sendMessageLock) {
+      set({ messageDropped: true })
+      setTimeout(() => set({ messageDropped: false }), 2000)
+      return
+    }
+    sendMessageLock = true
     const screenshots = Array.isArray(screenshotData) ? screenshotData : screenshotData ? [screenshotData] : []
     const subjectStore = useSubjectStore.getState()
     const settingsStore = useSettingsStore.getState()
@@ -154,7 +167,6 @@ export const useAiStore = create<AiState>((set, get) => ({
         subjectStore.setCurrentSubject(detectedId)
         subjectId = detectedId
       } else {
-        // 确保"综合"存在，始终落在综合
         let main = subjectStore.subjects.find((s) => s.id === 'main')
         if (!main) {
           subjectId = subjectStore.addSubject('综合')
@@ -228,6 +240,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           },
         }
       })
+      sendMessageLock = false
       return
     }
 
@@ -247,6 +260,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           },
         }
       })
+      sendMessageLock = false
       return
     }
 
@@ -257,18 +271,90 @@ export const useAiStore = create<AiState>((set, get) => ({
       const session = get().sessions[activeSessionId!]
       if (!session) return
 
-      // 上下文隔离：只发送当前消息
-      // 追问模式：带上最后一对 Q&A
+      // 上下文管理：识别新题目清空上下文，单题内用压缩
+      // 判断是否为新题目：不含追问关键词 且 长度 > 15 字符
+      const followUpWords = ['这', '那', '上面', '刚才', '继续', '为什么', '怎么', '如何', '请解释', '详细', '例子', '不懂', '明白', '还是', '可是', '但是', '然后', '接着', '补充', '具体']
+      const isFollowUp = session.contextWindow.length > 0 && (
+        content.length < 15 ||
+        followUpWords.some((w) => content.includes(w))
+      )
+
       let contextMessages: Message[]
-      if (isFollowUp && session.messages.length >= 3) {
-        const prevQ = session.messages[session.messages.length - 3]
-        const prevA = session.messages[session.messages.length - 2]
-        contextMessages = [prevQ, prevA, userMessage]
+      if (isFollowUp) {
+        // 追问：在当前上下文基础上添加
+        const updated = [...session.contextWindow, userMessage]
+        // 按 64k token 估算（≈128k 字符），超过则让 AI 总结压缩
+        const MAX_CHARS = 128000
+        const totalChars = updated.reduce((sum, m) => sum + m.content.length + (m.screenshotData ? 500 : 0), 0)
+
+        if (totalChars <= MAX_CHARS) {
+          contextMessages = updated
+        } else {
+          // 需要压缩：保留首条 + 最近几条，中间让 AI 总结
+          const RECENT_KEEP = 6
+          const first = updated[0]
+          const middle = updated.slice(1, -(RECENT_KEEP))
+          const tail = updated.slice(-RECENT_KEEP)
+
+          // 用同一模型总结中间部分
+          const summaryText = middle.map((m) => `${m.role === 'user' ? '学生' : '老师'}：${m.content}`).join('\n')
+          const summarizeBody = {
+            model: model.modelId,
+            messages: [
+              { role: 'system', content: '请用中文简要总结以下对话的核心内容，保留关键问题、解题步骤和结论，控制在500字以内。只输出总结内容，不要多余的话。' },
+              { role: 'user', content: summaryText },
+            ],
+            stream: false,
+          }
+
+          try {
+            const res = await fetch(config.apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
+              body: JSON.stringify(summarizeBody),
+              signal: AbortSignal.timeout(15000),
+            })
+            if (res.ok) {
+              const data = await res.json()
+              const summary = data.choices?.[0]?.message?.content || '（摘要生成失败）'
+              const summaryMsg: Message = { id: generateId('msg'), role: 'assistant', content: `[对话摘要] ${summary}`, timestamp: Date.now(), type: 'text' }
+              contextMessages = [first, summaryMsg, ...tail]
+            } else {
+              // 总结失败，fallback 为首条 + 最近几条
+              contextMessages = [first, ...tail]
+            }
+          } catch {
+            contextMessages = [first, ...tail]
+          }
+        }
       } else {
+        // 新题目：清空上一题上下文，从当前消息开始
         contextMessages = [userMessage]
       }
 
-      const apiMessages = contextMessages.map((msg) => {
+      // 更新 session 的 contextWindow
+      set((state) => {
+        const s = state.sessions[activeSessionId!]
+        if (!s) return state
+        return {
+          sessions: {
+            ...state.sessions,
+            [activeSessionId!]: { ...s, contextWindow: contextMessages },
+          },
+        }
+      })
+
+      const systemPrompt = `你是一个智能学习助手，帮助学生解决学习中的各种问题。
+
+回答原则：
+- 直接回答问题，不废话
+- 有公式或代码时用 Markdown 格式清晰展示
+- 复杂问题分步骤说明
+- 如果学生问的是题目，先分析再给解法
+- 不确定的内容如实说明，不要编造
+- 默认用中文回答，除非用户明确要求用其他语言`
+
+      const apiMessages = [{ role: 'system', content: systemPrompt }, ...contextMessages.map((msg) => {
         const msgScreenshots = msg === userMessage ? screenshots : (msg.screenshotData ? [msg.screenshotData] : [])
         if (msgScreenshots.length > 0) {
           return {
@@ -280,7 +366,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           }
         }
         return { role: msg.role, content: msg.content }
-      })
+      })]
 
       let apiUrl = config.apiUrl.trim()
       const apiKey = config.apiKey.trim()
@@ -345,6 +431,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       let fullText = ''
       let buffer = ''
       let done = false
+      let dataLines: string[] = []
 
       while (!done) {
         const result = await reader.read()
@@ -354,29 +441,58 @@ export const useAiStore = create<AiState>((set, get) => ({
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
+        // SSE 规范：多行 data 字段用换行拼接，空行分隔事件
         for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed || !trimmed.startsWith('data: ')) continue
-          const data = trimmed.slice(6)
-          if (data === '[DONE]') { done = true; break }
+          if (line.startsWith('data: ')) {
+            dataLines.push(line.slice(6))
+          } else if (line.trim() === '' && dataLines.length > 0) {
+            // 空行：处理累积的 data
+            const data = dataLines.join('\n')
+            dataLines = []
+            if (data === '[DONE]') { done = true; break }
 
-          try {
-            const parsed = JSON.parse(data)
-            const delta = parsed.choices?.[0]?.delta?.content
-            if (delta) {
-              fullText += delta
-              set((state) => {
-                const s = state.sessions[activeSessionId!]
-                if (!s) return state
-                return {
-                  sessions: {
-                    ...state.sessions,
-                    [activeSessionId!]: { ...s, chatState: 'streaming', streamingText: fullText },
-                  },
-                }
-              })
-            }
-          } catch { /* ignore parse errors */ }
+            try {
+              const parsed = JSON.parse(data)
+              const delta = parsed.choices?.[0]?.delta?.content
+              if (delta) {
+                fullText += delta
+                set((state) => {
+                  const s = state.sessions[activeSessionId!]
+                  if (!s) return state
+                  return {
+                    sessions: {
+                      ...state.sessions,
+                      [activeSessionId!]: { ...s, chatState: 'streaming', streamingText: fullText },
+                    },
+                  }
+                })
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+        // 处理 buffer 中残留的 data（无尾部空行的情况）
+        if (dataLines.length > 0) {
+          const data = dataLines.join('\n')
+          if (data === '[DONE]') { done = true }
+          else {
+            try {
+              const parsed = JSON.parse(data)
+              const delta = parsed.choices?.[0]?.delta?.content
+              if (delta) {
+                fullText += delta
+                set((state) => {
+                  const s = state.sessions[activeSessionId!]
+                  if (!s) return state
+                  return {
+                    sessions: {
+                      ...state.sessions,
+                      [activeSessionId!]: { ...s, chatState: 'streaming', streamingText: fullText },
+                    },
+                  }
+                })
+              }
+            } catch { /* ignore parse errors */ }
+          }
         }
       }
 
@@ -448,6 +564,8 @@ export const useAiStore = create<AiState>((set, get) => ({
         }
       })
       debouncedSessionSave()
+    } finally {
+      sendMessageLock = false
     }
   },
 
@@ -477,6 +595,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...session.messages.slice(0, -1), completedMessage],
               chatState: 'idle',
               streamingText: '',
+              contextWindow: [...session.contextWindow, completedMessage],
             },
           },
         }
@@ -500,6 +619,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...session.messages, partialMessage],
               chatState: 'idle',
               streamingText: '',
+              contextWindow: [...session.contextWindow, partialMessage],
             },
           },
         }
@@ -540,6 +660,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   })),
   clearPendingScreenshots: () => set({ pendingScreenshots: [] }),
   setThinkingMode: (on) => set({ thinkingMode: on }),
+  setMessageDropped: (v) => set({ messageDropped: v }),
 
   loadFromStorage: () => {
     try {
@@ -556,6 +677,7 @@ export const useAiStore = create<AiState>((set, get) => ({
             subjectId: String(s.subjectId),
             name: String(s.name || '新会话'),
             messages: s.messages as Message[],
+            contextWindow: (s.contextWindow as Message[]) || [],
             chatState: 'idle',
             streamingText: '',
             error: null,
@@ -580,10 +702,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       const saveableSessions: Record<string, AiSession> = {}
       for (const [id, session] of Object.entries(sessions)) {
         // 流式中的会话保存为 idle，避免丢失
-        if (session.chatState === 'streaming' || session.chatState === 'thinking') {
-          saveableSessions[id] = { ...session, chatState: 'idle', streamingText: '' }
-        } else {
-          saveableSessions[id] = session
+        const base = session.chatState === 'streaming' || session.chatState === 'thinking'
+          ? { ...session, chatState: 'idle' as const, streamingText: '' }
+          : session
+        // contextWindow 中的截图已在 messages 中保存，去掉避免 localStorage 双倍占用
+        saveableSessions[id] = {
+          ...base,
+          contextWindow: base.contextWindow.map((m) =>
+            m.screenshotData ? { ...m, screenshotData: undefined } : m
+          ),
         }
       }
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({

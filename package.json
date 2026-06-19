@@ -1,6 +1,6 @@
 {
   "name": "student-assistant",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "学生学习助手 - 悬浮球+文档阅读+AI对话",
   "repository": {
     "type": "git",

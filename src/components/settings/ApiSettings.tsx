@@ -1,11 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { useSettingsStore, type ModelModality, type ModelConfig, type ProviderCategory } from '../../stores/settingsStore'
-import { PROVIDER_PRESETS, CATEGORY_LABELS, CATEGORY_COLORS, MODALITY_LABELS, MODALITY_COLORS, type ProviderPreset } from '../../config/providerPresets'
+import { useSettingsStore, type ModelConfig, type ProviderCategory } from '../../stores/settingsStore'
+import { PROVIDER_PRESETS, CATEGORY_LABELS, CATEGORY_COLORS, type ProviderPreset } from '../../config/providerPresets'
 import { DEFAULT_MAX_TOKENS } from '../../lib/constants'
 
 type View = 'list' | 'presets' | 'form'
-
-const ALL_MODALITIES: ModelModality[] = ['vision', 'document']
 
 function DefaultModelSelect({ models, activeModelId, onSelect }: {
   models: { configId: string; configName: string; modelId: string; modelName: string }[]
@@ -54,9 +52,9 @@ export default function ApiSettings() {
     addModelToConfig,
     removeModelFromConfig,
     updateModelInConfig,
-    defaultModels,
+    defaultModelId,
     setDefaultModel,
-    getActiveModelForModality,
+    getActiveModel,
   } = useSettingsStore()
 
   const [modelList, setModelList] = useState<string[]>([])
@@ -123,7 +121,6 @@ export default function ApiSettings() {
   const handleSave = () => {
     if (!formData.name || !formData.apiKey || !formData.apiUrl) return
 
-    // 从预设中获取模型信息
     const preset = PROVIDER_PRESETS.find((p) => p.name === formData.name)
     const models: ModelConfig[] = []
 
@@ -134,20 +131,19 @@ export default function ApiSettings() {
             id: `model-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             name: pm.name,
             modelId: pm.modelId,
-            modalities: [...pm.modalities],
+            hasVision: pm.hasVision,
             maxContextTokens: pm.maxContextTokens,
           })
         }
       }
     }
 
-    // 至少保证有一个模型
     if (models.length === 0) {
       models.push({
         id: `model-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         name: '默认模型',
         modelId: 'gpt-4o',
-        modalities: ['vision'],
+        hasVision: true,
         maxContextTokens: DEFAULT_MAX_TOKENS,
       })
     }
@@ -167,19 +163,23 @@ export default function ApiSettings() {
   }
 
   const handleAddModelFromList = (configId: string, modelId: string) => {
-    // 检查是否已存在
     const config = apiConfigs.find((c) => c.id === configId)
     if (config?.models.some((m) => m.modelId === modelId)) return
     addModelToConfig(configId, {
       name: modelId,
       modelId,
-      modalities: ['vision'],
+      hasVision: true,
       maxContextTokens: DEFAULT_MAX_TOKENS,
     })
   }
 
   // ---- 列表视图 ----
   if (view === 'list') {
+    const allModels = apiConfigs.flatMap((c) =>
+      c.models.map((m) => ({ configId: c.id, configName: c.name, modelId: m.id, modelName: m.name }))
+    )
+    const active = getActiveModel()
+
     return (
       <div className="max-w-2xl">
         <div className="flex items-center justify-between mb-4">
@@ -194,31 +194,18 @@ export default function ApiSettings() {
           <div className="mb-4 border border-gray-200 rounded-lg p-4 bg-white">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-700">默认模型</h3>
-              <span className="text-xs text-blue-500 bg-blue-50 px-2 py-1 rounded">请选择有视觉能力的模型</span>
+              <span className="text-xs text-blue-500 bg-blue-50 px-2 py-1 rounded">所有对话使用此模型</span>
             </div>
-            <div className="space-y-2">
-              {(['vision', 'document'] as ModelModality[]).map((mod) => {
-                const active = getActiveModelForModality(mod)
-                const allForMod = apiConfigs.flatMap((c) =>
-                  c.models.filter((m) => m.modalities.includes(mod)).map((m) => ({ configId: c.id, configName: c.name, modelId: m.id, modelName: m.name }))
-                )
-                return (
-                  <div key={mod} className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500 w-20 flex-shrink-0">{MODALITY_LABELS[mod]}</span>
-                    <div className="relative flex-1">
-                      <DefaultModelSelect
-                        models={allForMod}
-                        activeModelId={defaultModels[mod]}
-                        onSelect={(modelId) => setDefaultModel(mod, modelId)}
-                      />
-                    </div>
-                    {active && (
-                      <span className="text-[10px] text-gray-400 truncate max-w-[80px]">{active.config.name}</span>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            <DefaultModelSelect
+              models={allModels}
+              activeModelId={defaultModelId}
+              onSelect={(modelId) => setDefaultModel(modelId)}
+            />
+            {active && (
+              <div className="mt-2 text-[10px] text-gray-400">
+                当前: {active.config.name} / {active.model.name}
+              </div>
+            )}
           </div>
         )}
 
@@ -355,24 +342,17 @@ export default function ApiSettings() {
                               placeholder="Token"
                             />
                             <div className="flex gap-0.5">
-                              {ALL_MODALITIES.map((mod) => (
-                                <button
-                                  key={mod}
-                                  onClick={() => {
-                                    const mods = m.modalities.includes(mod)
-                                      ? m.modalities.filter((x) => x !== mod)
-                                      : [...m.modalities, mod]
-                                    updateModelInConfig(config.id, m.id, { modalities: mods })
-                                  }}
-                                  className="text-[9px] px-1 py-0.5 rounded transition-colors"
-                                  style={{
-                                    backgroundColor: m.modalities.includes(mod) ? `${MODALITY_COLORS[mod]}20` : '#f3f4f6',
-                                    color: m.modalities.includes(mod) ? MODALITY_COLORS[mod] : '#9ca3af',
-                                  }}
-                                >
-                                  {MODALITY_LABELS[mod]}
-                                </button>
-                              ))}
+                              <button
+                                onClick={() => updateModelInConfig(config.id, m.id, { hasVision: !m.hasVision })}
+                                className="text-[9px] px-1 py-0.5 rounded transition-colors"
+                                style={{
+                                  backgroundColor: m.hasVision ? '#8b5cf620' : '#f3f4f6',
+                                  color: m.hasVision ? '#8b5cf6' : '#9ca3af',
+                                }}
+                                title="支持图片识别"
+                              >
+                                视觉
+                              </button>
                               <button
                                 onClick={() => updateModelInConfig(config.id, m.id, { audioCapable: !m.audioCapable })}
                                 className="text-[9px] px-1 py-0.5 rounded transition-colors"
@@ -380,7 +360,7 @@ export default function ApiSettings() {
                                   backgroundColor: m.audioCapable ? '#f59e0b20' : '#f3f4f6',
                                   color: m.audioCapable ? '#f59e0b' : '#9ca3af',
                                 }}
-                                title="支持音频转文字（如 GPT-4o Whisper）"
+                                title="支持音频转文字"
                               >
                                 音频
                               </button>
@@ -396,7 +376,7 @@ export default function ApiSettings() {
 
                         {/* 手动添加模型 */}
                         <button
-                          onClick={() => addModelToConfig(config.id, { name: '', modelId: '', modalities: [], maxContextTokens: DEFAULT_MAX_TOKENS })}
+                          onClick={() => addModelToConfig(config.id, { name: '', modelId: '', hasVision: false, maxContextTokens: DEFAULT_MAX_TOKENS })}
                           className="mt-1 text-xs text-blue-500 hover:text-blue-600"
                         >
                           + 手动添加模型
@@ -533,7 +513,7 @@ export default function ApiSettings() {
         {/* 模型选择 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">模型</label>
-          <p className="text-xs text-gray-400 mb-2">添加后可在编辑中修改模态和参数</p>
+          <p className="text-xs text-gray-400 mb-2">添加后可在编辑中修改参数</p>
           <div className="flex flex-wrap gap-1.5">
             {formData.preselectedModels.map((modelId) => (
               <button

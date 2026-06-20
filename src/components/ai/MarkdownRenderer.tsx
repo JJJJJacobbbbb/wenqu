@@ -21,6 +21,11 @@ renderer.code = function (args: any) {
   return `<pre><code class="language-${language}">${escaped}</code></pre>`
 }
 
+// 表格包裹在可滚动容器中
+renderer.table = function (header: string, body: string) {
+  return `<div class="table-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`
+}
+
 marked.setOptions({
   renderer,
   gfm: true,

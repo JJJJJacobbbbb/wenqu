@@ -214,16 +214,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     // 确定模态：有截图时需要视觉模型，否则任意模型
     const needsVision = screenshots.length > 0
-    let modelInfo = needsVision
-      ? settingsStore.getActiveModelForModality('vision')
-      : settingsStore.getActiveModelForModality('vision') || settingsStore.getActiveModelForModality('document')
-
-    // 回退：找第一个可用模型（含 modalities 为空的纯文本模型）
-    if (!modelInfo) {
-      for (const config of settingsStore.apiConfigs) {
-        if (config.models.length > 0) { modelInfo = { config, model: config.models[0] }; break }
-      }
-    }
+    let modelInfo = settingsStore.getActiveModel()
 
     if (!modelInfo) {
       set((state) => {
@@ -245,7 +236,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
 
     // 需要视觉能力但当前模型不支持视觉
-    if (needsVision && !modelInfo.model.modalities.includes('vision')) {
+    if (needsVision && !modelInfo.model.hasVision) {
       set((state) => {
         const session = state.sessions[activeSessionId!]
         if (!session) return state

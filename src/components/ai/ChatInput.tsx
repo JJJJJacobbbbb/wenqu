@@ -14,11 +14,11 @@ interface ChatInputProps {
 export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps = {}) {
   const [input, setInput] = useState('')
   const { sendMessage, getActiveSession, stopGeneration, pendingScreenshots, addPendingScreenshot, removePendingScreenshot, clearPendingScreenshots, thinkingMode, setThinkingMode, messageDropped } = useAiStore()
-  const { apiConfigs, setDefaultModel, getActiveModelForModality } = useSettingsStore()
+  const { apiConfigs, setDefaultModel, getActiveModel } = useSettingsStore()
   const { selectionMode, toggleSelectionMode } = useDocumentStore()
   const session = getActiveSession()
   const isGenerating = session?.chatState === 'thinking' || session?.chatState === 'streaming'
-  const hasVisionModel = getActiveModelForModality('vision') !== null
+  const hasVisionModel = useSettingsStore.getState().hasVisionModel()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingScreenshotsRef = useRef(pendingScreenshots)
   pendingScreenshotsRef.current = pendingScreenshots
@@ -58,7 +58,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
     ),
     [apiConfigs]
   )
-  const activeModel = getActiveModelForModality('vision') || getActiveModelForModality('document')
+  const activeModel = getActiveModel()
 
   const handleScreenshotCapture = useCallback((imageData: string) => {
     addPendingScreenshot(imageData)
@@ -262,30 +262,20 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
                 ) : (
                   allModels.map((m) => {
                     const isActive = activeModel?.model.id === m.modelId
-                    const config = apiConfigs.find((c) => c.id === m.configId)
-                    const model = config?.models.find((mdl) => mdl.id === m.modelId)
-                    const modalities = model?.modalities || []
                     return (
                       <button
                         key={m.modelId}
                         onClick={() => {
-                          if (modalities.length === 0) return
-                          const modality = modalities[0]
-                          setDefaultModel(modality, m.modelId)
+                          setDefaultModel(m.modelId)
                           setModelOpen(false)
                         }}
                         className={`w-full px-3 py-1.5 text-left text-xs flex items-center justify-between transition-colors ${
-                          isActive ? 'bg-blue-50 text-blue-700' : modalities.length === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-50'
+                          isActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'
                         }`}
-                        disabled={modalities.length === 0}
                       >
                         <div className="min-w-0 flex-1">
                           <span className="truncate block">{m.modelName}</span>
-                          <span className="text-[10px] text-gray-400">
-                            {m.configName}
-                            {modalities.length > 0 && ` · ${modalities.join('/')}`}
-                            {modalities.length === 0 && ' · 未标注模态'}
-                          </span>
+                          <span className="text-[10px] text-gray-400">{m.configName}</span>
                         </div>
                         {isActive && (
                           <svg className="w-3 h-3 text-blue-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">

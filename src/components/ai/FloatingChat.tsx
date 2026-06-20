@@ -19,6 +19,22 @@ export default function FloatingChat() {
   const { getActiveSession, clearError, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore()
   const { currentSubjectId, subjects } = useSubjectStore()
   const session = getActiveSession()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 自动滚动到底部
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+
+  useEffect(() => {
+    requestAnimationFrame(scrollToBottom)
+  }, [session?.messages.length, session?.streamingText, session?.chatState, scrollToBottom])
+
+  // 切换会话时滚动到底部
+  useEffect(() => {
+    requestAnimationFrame(scrollToBottom)
+  }, [activeSessionId, scrollToBottom])
 
   // 关闭菜单
   useEffect(() => {
@@ -261,7 +277,7 @@ export default function FloatingChat() {
         </div>
       ) : (
         <>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {session?.messages.map((message) => (
               <div key={message.id}>
                 <ChatMessage message={message} />

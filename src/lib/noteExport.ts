@@ -1,4 +1,4 @@
-import type { Note, NoteCategory } from '../stores/noteStore'
+import type { Note } from '../stores/noteStore'
 import { NOTE_CATEGORY_LABELS } from '../stores/noteStore'
 import type { Subject } from '../stores/subjectStore'
 import { getDesktopHost } from './desktopHost'
@@ -82,26 +82,6 @@ export async function exportNotes(notes: Note[], subjects: Subject[], filenamePr
   if (notes.length === 0) return
   const md = notesToMarkdown(notes, subjects)
   await saveMarkdown(md, filenamePrefix)
-}
-
-export async function exportByCategory(
-  notes: Note[],
-  subjects: Subject[],
-  category: NoteCategory
-): Promise<void> {
-  const filtered = notes.filter((n) => n.category === category)
-  const label = NOTE_CATEGORY_LABELS[category] || '其他'
-  await exportNotes(filtered, subjects, `问渠笔记_${label}`)
-}
-
-export async function exportBySubject(
-  notes: Note[],
-  subjects: Subject[],
-  subjectId: string
-): Promise<void> {
-  const subject = subjects.find((s) => s.id === subjectId)
-  const filtered = notes.filter((n) => n.subjectId === subjectId)
-  await exportNotes(filtered, subjects, `问渠笔记_${subject?.name || '未分类'}`)
 }
 
 async function saveFileToFolder(folderPath: string, fileName: string, content: string): Promise<void> {

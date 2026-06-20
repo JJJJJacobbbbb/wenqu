@@ -11,7 +11,7 @@ import SettingsPage from './components/settings/SettingsPage'
 import NoteList from './components/notes/NoteList'
 
 function App() {
-  const { activeTabType, notesCollapsed, expandNotes } = useTabStore()
+  const { activeTabType } = useTabStore()
   const openSettings = useTabStore((s) => s.openSettings)
   const loadSettings = useSettingsStore((s) => s.loadFromStorage)
   const loadNotes = useNoteStore((s) => s.loadFromStorage)
@@ -35,33 +35,31 @@ function App() {
     return () => { unmounted = true; cleanup?.() }
   }, [])
 
-  const isNotesActive = activeTabType === 'notes' && !notesCollapsed
+  const isNotesActive = activeTabType === 'notes'
+  const isSettingsActive = activeTabType === 'settings'
 
   return (
     <div className="h-screen bg-gray-50 flex">
-      {/* 笔记收起状态：左侧窄条 */}
-      {activeTabType === 'notes' && notesCollapsed && (
-        <button
-          onClick={expandNotes}
-          className="w-8 bg-blue-50 border-r border-blue-200 flex items-center justify-center hover:bg-blue-100 transition-colors flex-shrink-0"
-          title="展开笔记"
-        >
-          <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </button>
-      )}
-
-      {/* 主内容区 */}
-      <div className={`flex-1 flex flex-col min-w-0 ${isNotesActive ? 'hidden' : ''}`}>
-        <div className={`flex-1 flex flex-col ${activeTabType !== 'document' && !notesCollapsed ? 'hidden' : ''}`}>
+      {/* 主内容区：文档 */}
+      {!isNotesActive && !isSettingsActive && (
+        <div className="flex-1 min-w-0">
           <DocumentViewer />
         </div>
-        {activeTabType === 'settings' && <SettingsPage />}
-      </div>
+      )}
 
-      {/* 笔记展开状态：占满剩余空间 */}
-      {isNotesActive && <div className="flex-1 min-w-0"><NoteList /></div>}
+      {/* 设置页 */}
+      {isSettingsActive && (
+        <div className="flex-1 min-w-0">
+          <SettingsPage />
+        </div>
+      )}
+
+      {/* 笔记页 */}
+      {isNotesActive && (
+        <div className="flex-1 min-w-0">
+          <NoteList />
+        </div>
+      )}
     </div>
   )
 }

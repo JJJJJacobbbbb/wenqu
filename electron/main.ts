@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, clipboard } from 'electron'
 import path from 'path'
 
+const APP_ICON = path.join(__dirname, '../resources/wenqu.ico')
+
 function validateFilePath(filePath: string): string {
   if (!filePath || typeof filePath !== 'string') throw new Error('Invalid file path')
   // 拒绝空字节（防止路径截断攻击）
@@ -54,6 +56,7 @@ function createMainWindow() {
     minWidth: 800,
     minHeight: 600,
     frame: false,
+    icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -104,6 +107,7 @@ function createChatWindow() {
     maximizable: false,
     minWidth: 280,
     minHeight: 300,
+    icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -147,25 +151,7 @@ function createChatWindow() {
 }
 
 function createTray() {
-  // 生成 16x16 蓝色圆形托盘图标 (BGRA 位图)
-  const size = 16
-  const buffer = Buffer.alloc(size * size * 4)
-  const cx = size / 2
-  const cy = size / 2
-  const radius = size / 2 - 1
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const offset = (y * size + x) * 4
-      const dist = Math.sqrt((x - cx + 0.5) ** 2 + (y - cy + 0.5) ** 2)
-      if (dist <= radius) {
-        buffer[offset] = 233     // B (BGRA)
-        buffer[offset + 1] = 165 // G
-        buffer[offset + 2] = 14  // R
-        buffer[offset + 3] = 255 // A
-      }
-    }
-  }
-  const icon = nativeImage.createFromBitmap(buffer, { width: size, height: size })
+  const icon = nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 })
 
   tray = new Tray(icon)
 

@@ -31,7 +31,6 @@ interface SubjectState {
   removeSubject: (id: string) => void
   renameSubject: (id: string, newName: string) => void
   setCurrentSubject: (id: string | null) => void
-  getCurrentSubject: () => Subject | null
   detectSubject: (content: string) => string | null
   loadFromStorage: () => void
   saveToStorage: () => void
@@ -101,11 +100,6 @@ export const useSubjectStore = create<SubjectState>((set, get) => ({
 
   setCurrentSubject: (id) => {
     set({ currentSubjectId: id })
-  },
-
-  getCurrentSubject: () => {
-    const { subjects, currentSubjectId } = get()
-    return subjects.find((s) => s.id === currentSubjectId) || null
   },
 
   detectSubject: (content) => {

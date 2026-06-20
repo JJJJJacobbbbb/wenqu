@@ -139,10 +139,17 @@ body {
   color: #6b7280;
 }
 
+.markdown-content .table-wrap {
+  overflow-x: auto;
+  margin-bottom: 1em;
+  -webkit-overflow-scrolling: touch;
+}
+
 .markdown-content table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 1em;
+  margin-bottom: 0;
+  min-width: 0;
 }
 
 .markdown-content th,
@@ -150,6 +157,7 @@ body {
   border: 1px solid #e5e7eb;
   padding: 0.5em 1em;
   text-align: left;
+  white-space: nowrap;
 }
 
 .markdown-content th {

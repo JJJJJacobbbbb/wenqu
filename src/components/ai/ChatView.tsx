@@ -1,4 +1,4 @@
-import { useEffect, useState, ReactNode, useCallback, useMemo } from 'react'
+import { useEffect, useState, useRef, ReactNode, useCallback, useMemo } from 'react'
 import { useAiStore } from '../../stores/aiStore'
 import { useSubjectStore } from '../../stores/subjectStore'
 import { useNoteStore, type Note, type GeneratedNoteData } from '../../stores/noteStore'
@@ -30,8 +30,25 @@ export default function ChatView({
   const { getActiveSession, clearError, createSession, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore()
   const { currentSubjectId, subjects } = useSubjectStore()
   const { generateNote, addNote, mergeNote } = useNoteStore()
-  const { hasModelWithModality, apiConfigs } = useSettingsStore()
+  const { getActiveModel, apiConfigs } = useSettingsStore()
   const session = getActiveSession()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 自动滚动到底部
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+
+  useEffect(() => {
+    // 延迟一帧等 DOM 更新后再滚动
+    requestAnimationFrame(scrollToBottom)
+  }, [session?.messages.length, session?.streamingText, session?.chatState, scrollToBottom])
+
+  // 切换会话时滚动到底部
+  useEffect(() => {
+    requestAnimationFrame(scrollToBottom)
+  }, [activeSessionId, scrollToBottom])
 
   const [showHistory, setShowHistory] = useState(false)
   const [noteGenMsgIdx, setNoteGenMsgIdx] = useState<number | null>(null)
@@ -113,8 +130,8 @@ export default function ChatView({
   }, [session, currentSubjectId, generateNote, addNote])
 
   const hasAiModel = useMemo(() =>
-    hasModelWithModality('vision') || hasModelWithModality('document') || apiConfigs.some(c => c.models.length > 0),
-    [hasModelWithModality, apiConfigs]
+    getActiveModel() !== null,
+    [apiConfigs]
   )
 
   const handleMerge = useCallback(async () => {
@@ -246,7 +263,7 @@ export default function ChatView({
           )}
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
           {session?.messages.map((message, idx) => {
             const isGeneratingThis = noteGenMsgIdx === idx
             return (

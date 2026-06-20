@@ -76,7 +76,6 @@ interface NoteState {
   updateNote: (id: string, updates: Partial<Pick<Note, 'title' | 'content' | 'subjectId' | 'category' | 'chapter'>>) => void
   removeNote: (id: string) => void
   setFilter: (type: 'all' | 'subject', subjectId?: string | null) => void
-  setFilterCategory: (category: NoteCategory | null) => void
   setSearchQuery: (query: string) => void
   getFilteredNotes: () => Note[]
 
@@ -132,8 +131,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set({ filterType: type, filterSubjectId: subjectId, filterCategory: null })
   },
 
-  setFilterCategory: (category) => set({ filterCategory: category }),
-
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   getFilteredNotes: () => {
@@ -164,16 +161,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   generateNote: async (userContent, assistantContent, subjectId, type) => {
     const settingsStore = useSettingsStore.getState()
-    let modelInfo = settingsStore.getActiveModelForModality('vision')
-      || settingsStore.getActiveModelForModality('document')
-    if (!modelInfo) {
-      for (const c of settingsStore.apiConfigs) {
-        if (c.models.length > 0) {
-          modelInfo = { config: c, model: c.models[0] }
-          break
-        }
-      }
-    }
+    const modelInfo = settingsStore.getActiveModel()
     if (!modelInfo) return null
 
     const { config, model } = modelInfo
@@ -238,16 +226,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   mergeNote: async (existingNote, newTitle, newContent) => {
     const settingsStore = useSettingsStore.getState()
-    let modelInfo = settingsStore.getActiveModelForModality('vision')
-      || settingsStore.getActiveModelForModality('document')
-    if (!modelInfo) {
-      for (const c of settingsStore.apiConfigs) {
-        if (c.models.length > 0) {
-          modelInfo = { config: c, model: c.models[0] }
-          break
-        }
-      }
-    }
+    const modelInfo = settingsStore.getActiveModel()
     if (!modelInfo) return null
 
     const { config, model } = modelInfo

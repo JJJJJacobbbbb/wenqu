@@ -1,7 +1,6 @@
-import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useTabStore } from '../../stores/tabStore'
-import { useNoteStore } from '../../stores/noteStore'
 import { useAiStore } from '../../stores/aiStore'
 
 import { getDesktopHost } from '../../lib/desktopHost'
@@ -13,17 +12,12 @@ import DocxViewer from './DocxViewer'
 import ImageViewer from './ImageViewer'
 import ChatView from '../ai/ChatView'
 import WinControls from '../shared/WinControls'
-import NoteCard from '../notes/NoteCard'
 
 export default function DocumentViewer() {
   const { tabs, activeTabId, closeTab, setActiveTab, getActiveDocument, openFile, selectionMode } = useDocumentStore()
-  const { openSettings } = useTabStore()
-  const { getFilteredNotes, notes, filterType, filterSubjectId, filterCategory, searchQuery } = useNoteStore()
+  const { openSettings, openNotes } = useTabStore()
 
   const activeDocument = getActiveDocument()
-  const filteredNotes = useMemo(() => getFilteredNotes(), [notes, filterType, filterSubjectId, filterCategory, searchQuery])
-  const [showNotes, setShowNotes] = useState(false)
-  const [notesCollapsed, setNotesCollapsed] = useState(false)
 
 
   // 框选状态
@@ -235,17 +229,8 @@ export default function DocumentViewer() {
             打开文件
           </button>
           <button
-            onClick={() => {
-              if (showNotes && notesCollapsed) {
-                setNotesCollapsed(false)
-              } else {
-                setShowNotes(!showNotes)
-                if (showNotes) setNotesCollapsed(false)
-              }
-            }}
-            className={`h-7 px-2 text-xs rounded flex items-center gap-1 ${
-              showNotes ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'
-            }`}
+            onClick={openNotes}
+            className="h-7 px-2 text-xs rounded flex items-center gap-1 text-gray-600 hover:bg-gray-100"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -321,76 +306,6 @@ export default function DocumentViewer() {
           <ChatView />
         </div>
       </div>
-
-      {/* 笔记侧边栏 - 收起时显示小浮动按钮 */}
-      {showNotes && notesCollapsed && (
-        <button
-          onClick={() => setNotesCollapsed(false)}
-          className="absolute left-2 bottom-4 w-10 h-10 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-600 transition-colors z-40"
-          title="展开笔记"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-          </svg>
-        </button>
-      )}
-
-      {showNotes && !notesCollapsed && (
-        <div className="absolute inset-0 z-40 flex" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <div className="w-96 bg-white border-r border-gray-200 shadow-xl flex flex-col z-10">
-            <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
-              <h3 className="text-sm font-semibold text-gray-800">笔记</h3>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setNotesCollapsed(true)}
-                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                  title="收起笔记"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => { setShowNotes(false); setNotesCollapsed(false) }}
-                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                  title="关闭笔记"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div className="px-4 py-3 border-b border-gray-100">
-              <span className="text-xs text-gray-500">最近笔记</span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3">
-              {filteredNotes.length === 0 ? (
-                <div className="text-center text-gray-400 py-10">
-                  <svg className="w-10 h-10 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <p className="text-sm">暂无笔记</p>
-                  <p className="text-xs mt-1">对话中点击 AI 消息下方的按钮生成</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {filteredNotes.map((note) => (
-                    <NoteCard key={note.id} note={note} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div
-            className="flex-1 bg-black/30 backdrop-blur-sm"
-            onClick={() => setNotesCollapsed(true)}
-          />
-        </div>
-      )}
     </div>
   )
 }

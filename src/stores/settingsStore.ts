@@ -4,13 +4,12 @@ import { SETTINGS_DEBOUNCE_MS, DEFAULT_MAX_TOKENS } from '../lib/constants'
 import { generateId } from '../lib/id'
 
 export type ProviderCategory = 'official' | 'cn' | 'aggregator' | 'custom'
-export type ModelModality = 'vision' | 'document'
 
 export interface ModelConfig {
   id: string
   name: string
   modelId: string
-  modalities: ModelModality[]
+  hasVision: boolean
   maxContextTokens: number
   audioCapable?: boolean
 }
@@ -24,11 +23,6 @@ export interface ApiConfig {
   category?: ProviderCategory
 }
 
-export interface DefaultModels {
-  vision: string | null
-  document: string | null
-}
-
 export interface ShortcutConfig {
   screenshot: string
   voice: string
@@ -37,8 +31,7 @@ export interface ShortcutConfig {
 interface SettingsState {
   apiConfigs: ApiConfig[]
   activeApiConfigId: string | null
-  defaultModels: DefaultModels
-  modelBarTab: string
+  defaultModelId: string | null
   shortcuts: ShortcutConfig
 
   addApiConfig: (config: Omit<ApiConfig, 'id'>) => string
@@ -51,14 +44,13 @@ interface SettingsState {
   removeModelFromConfig: (configId: string, modelId: string) => void
   updateModelInConfig: (configId: string, modelId: string, updates: Partial<ModelConfig>) => void
 
-  setDefaultModel: (modality: ModelModality, modelConfigId: string | null) => void
-  hasModelWithModality: (modality: ModelModality) => boolean
+  setDefaultModel: (modelConfigId: string | null) => void
+  hasVisionModel: () => boolean
   hasAudioModel: () => boolean
   getModelConfigById: (modelConfigId: string) => { config: ApiConfig; model: ModelConfig } | null
-  getActiveModelForModality: (modality: ModelModality) => { config: ApiConfig; model: ModelConfig } | null
+  getActiveModel: () => { config: ApiConfig; model: ModelConfig } | null
 
   updateShortcut: (action: keyof ShortcutConfig, key: string) => void
-  setModelBarTab: (tab: string) => void
   loadFromStorage: () => void
   saveToStorage: () => void
 }
@@ -74,22 +66,17 @@ function debouncedSave(fn: () => void) {
 const defaultSettings = {
   apiConfigs: [] as ApiConfig[],
   activeApiConfigId: null as string | null,
-  defaultModels: {
-    vision: null,
-    document: null,
-  } as DefaultModels,
+  defaultModelId: null as string | null,
   shortcuts: {
     screenshot: 'Ctrl+Shift+X',
     voice: 'Ctrl+Shift+V',
   },
-  modelBarTab: 'vision',
 }
 
 // 迁移旧格式 → 新格式
 function migrateConfig(raw: Record<string, unknown>): ApiConfig {
   // 旧格式有 model + isMultimodal，新格式有 models[]
   if (typeof raw.model === 'string' && !Array.isArray(raw.models)) {
-    const modalities: ModelModality[] = ['vision']
     return {
       id: raw.id as string,
       name: raw.name as string,
@@ -100,29 +87,36 @@ function migrateConfig(raw: Record<string, unknown>): ApiConfig {
         id: generateId('model'),
         name: raw.model as string,
         modelId: raw.model as string,
-        modalities,
+        hasVision: true,
         maxContextTokens: DEFAULT_MAX_TOKENS,
       }],
     }
   }
-  // 验证必要字段存在
-  if (typeof raw.id === 'string' && typeof raw.name === 'string' && typeof raw.apiUrl === 'string' && typeof raw.apiKey === 'string' && Array.isArray(raw.models)) {
+  // 迁移旧的 modalities 字段到 hasVision
+  if (Array.isArray(raw.models)) {
+    const models = (raw.models as Record<string, unknown>[]).map((m) => ({
+      id: String(m.id || generateId('model')),
+      name: String(m.name || ''),
+      modelId: String(m.modelId || ''),
+      hasVision: Array.isArray(m.modalities) ? (m.modalities as string[]).includes('vision') : Boolean(m.hasVision),
+      maxContextTokens: Number(m.maxContextTokens) || DEFAULT_MAX_TOKENS,
+      audioCapable: Boolean(m.audioCapable),
+    }))
     return {
-      id: raw.id,
-      name: raw.name,
-      apiUrl: raw.apiUrl,
-      apiKey: raw.apiKey,
-      models: raw.models as ModelConfig[],
+      id: String(raw.id || generateId('api')),
+      name: String(raw.name || ''),
+      apiUrl: String(raw.apiUrl || ''),
+      apiKey: String(raw.apiKey || ''),
+      models,
       category: raw.category as ProviderCategory | undefined,
     }
   }
-  // 如果验证失败，返回一个基本的配置（确保 ID 非空）
   return {
     id: raw.id ? String(raw.id) : generateId('api'),
     name: String(raw.name || ''),
     apiUrl: String(raw.apiUrl || ''),
     apiKey: String(raw.apiKey || ''),
-    models: Array.isArray(raw.models) ? raw.models as ModelConfig[] : [],
+    models: [],
     category: raw.category as ProviderCategory | undefined,
   }
 }
@@ -154,22 +148,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   removeApiConfig: (id) => {
     set((state) => {
       const newConfigs = state.apiConfigs.filter((c) => c.id !== id)
-      // 清理被删除 config 下的 defaultModels 引用
       const removedConfig = state.apiConfigs.find((c) => c.id === id)
       const removedModelIds = new Set(removedConfig?.models.map((m) => m.id) || [])
-      const newDefaults = { ...state.defaultModels }
-      for (const modality of Object.keys(newDefaults) as (keyof DefaultModels)[]) {
-        if (newDefaults[modality] && removedModelIds.has(newDefaults[modality]!)) {
-          newDefaults[modality] = null
-        }
-      }
+      const newDefaultModelId = state.defaultModelId && removedModelIds.has(state.defaultModelId) ? null : state.defaultModelId
       return {
         apiConfigs: newConfigs,
         activeApiConfigId:
           state.activeApiConfigId === id
             ? newConfigs.length > 0 ? newConfigs[0].id : null
             : state.activeApiConfigId,
-        defaultModels: newDefaults,
+        defaultModelId: newDefaultModelId,
       }
     })
     debouncedSave(() => get().saveToStorage())
@@ -184,8 +172,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const { apiConfigs, activeApiConfigId } = get()
     return apiConfigs.find((c) => c.id === activeApiConfigId) || null
   },
-
-  // === 多模型管理方法 ===
 
   addModelToConfig: (configId, model) => {
     const modelId = generateId('model')
@@ -205,14 +191,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const newConfigs = state.apiConfigs.map((c) =>
         c.id === configId ? { ...c, models: c.models.filter((m) => m.id !== modelId) } : c
       )
-      // 清理 defaultModels 引用
-      const newDefaults = { ...state.defaultModels }
-      for (const modality of Object.keys(newDefaults) as (keyof DefaultModels)[]) {
-        if (newDefaults[modality] === modelId) {
-          newDefaults[modality] = null
-        }
+      return {
+        apiConfigs: newConfigs,
+        defaultModelId: state.defaultModelId === modelId ? null : state.defaultModelId,
       }
-      return { apiConfigs: newConfigs, defaultModels: newDefaults }
     })
     debouncedSave(() => get().saveToStorage())
   },
@@ -229,25 +211,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     debouncedSave(() => get().saveToStorage())
   },
 
-  setDefaultModel: (modality, modelConfigId) => {
-    set((state) => ({
-      defaultModels: { ...state.defaultModels, [modality]: modelConfigId },
-    }))
+  setDefaultModel: (modelConfigId) => {
+    set({ defaultModelId: modelConfigId })
     debouncedSave(() => get().saveToStorage())
   },
 
-  hasModelWithModality: (modality) => {
+  hasVisionModel: () => {
     const { apiConfigs } = get()
-    return apiConfigs.some((c) =>
-      c.models.some((m) => m.modalities.includes(modality))
-    )
+    return apiConfigs.some((c) => c.models.some((m) => m.hasVision))
   },
 
   hasAudioModel: () => {
     const { apiConfigs } = get()
-    return apiConfigs.some((c) =>
-      c.models.some((m) => m.audioCapable)
-    )
+    return apiConfigs.some((c) => c.models.some((m) => m.audioCapable))
   },
 
   getModelConfigById: (modelConfigId) => {
@@ -259,20 +235,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     return null
   },
 
-  getActiveModelForModality: (modality) => {
-    const { defaultModels, apiConfigs } = get()
+  getActiveModel: () => {
+    const { defaultModelId, apiConfigs } = get()
 
-    // 1. 优先使用 defaultModels 中该模态的设定
-    const defaultModelId = defaultModels[modality]
+    // 1. 优先使用默认模型
     if (defaultModelId) {
       const result = get().getModelConfigById(defaultModelId)
-      if (result && result.model.modalities.includes(modality)) return result
+      if (result) return result
     }
 
-    // 2. Fallback: 在所有 config 中找第一个有该模态的模型
+    // 2. Fallback: 第一个可用模型
     for (const config of apiConfigs) {
-      const model = config.models.find((m) => m.modalities.includes(modality))
-      if (model) return { config, model }
+      if (config.models.length > 0) return { config, model: config.models[0] }
     }
 
     return null
@@ -288,11 +262,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     debouncedSave(() => get().saveToStorage())
   },
 
-  setModelBarTab: (tab) => {
-    set({ modelBarTab: tab })
-    debouncedSave(() => get().saveToStorage())
-  },
-
   loadFromStorage: () => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
@@ -304,11 +273,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         }
         const loadedConfigs = Array.isArray(parsed.apiConfigs) ? parsed.apiConfigs : defaultSettings.apiConfigs
         const loadedActiveId = typeof parsed.activeApiConfigId === 'string' ? parsed.activeApiConfigId : defaultSettings.activeApiConfigId
+        // 迁移旧的 defaultModels (per-modality) 到 defaultModelId (single)
+        let defaultModelId = typeof parsed.defaultModelId === 'string' ? parsed.defaultModelId : null
+        if (!defaultModelId && parsed.defaultModels && typeof parsed.defaultModels === 'object') {
+          // 旧格式: { vision: 'xxx', document: 'yyy' }
+          defaultModelId = parsed.defaultModels.vision || parsed.defaultModels.document || null
+        }
         set({
           apiConfigs: loadedConfigs,
           activeApiConfigId: loadedActiveId && loadedConfigs.some((c: ApiConfig) => c.id === loadedActiveId) ? loadedActiveId : (loadedConfigs[0]?.id || null),
-          defaultModels: { ...defaultSettings.defaultModels, ...(parsed.defaultModels || {}) },
-          modelBarTab: typeof parsed.modelBarTab === 'string' ? parsed.modelBarTab : defaultSettings.modelBarTab,
+          defaultModelId,
           shortcuts: parsed.shortcuts && typeof parsed.shortcuts === 'object' ? { ...defaultSettings.shortcuts, ...parsed.shortcuts } : defaultSettings.shortcuts,
         })
       }
@@ -323,8 +297,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const settings = {
         apiConfigs: state.apiConfigs,
         activeApiConfigId: state.activeApiConfigId,
-        defaultModels: state.defaultModels,
-        modelBarTab: state.modelBarTab,
+        defaultModelId: state.defaultModelId,
         shortcuts: state.shortcuts,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))

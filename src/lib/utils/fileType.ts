@@ -29,7 +29,3 @@ export function getFileType(fileName: string): DocumentTab['fileType'] | null {
       return null
   }
 }
-
-export function getSupportedExtensions(): string[] {
-  return Array.from(SUPPORTED_EXTENSIONS)
-}

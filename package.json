@@ -10,20 +10,29 @@
   "build": {
     "appId": "com.wenqu.student-assistant",
     "productName": "问渠",
+    "afterPack": "./scripts/fix-icon.js",
     "directories": {
       "output": "release"
     },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "resources/**/*"
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "问渠"
+      "shortcutName": "问渠",
+      "installerIcon": "resources/wenqu.ico",
+      "uninstallerIcon": "resources/wenqu.ico"
     },
     "win": {
       "target": ["nsis", "portable"],
-      "artifactName": "${productName} Setup ${version}.exe"
+      "artifactName": "${productName} Setup ${version}.exe",
+      "icon": "resources/wenqu.ico"
     },
     "portable": {
       "artifactName": "${productName} ${version} Portable.exe"

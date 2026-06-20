@@ -353,11 +353,16 @@ export const useAiStore = create<AiState>((set, get) => ({
 - 不确定的内容如实说明，不要编造
 - 默认用中文回答，除非用户明确要求用其他语言
 
-数学公式格式要求（非常重要）：
-- 行内公式必须用 \\(...\\) 包裹，例如 \\(E = mc^2\\)
-- 独立公式必须用 \\[...\\] 包裹
-- 不要用普通括号包裹公式，不要用 $...$ 格式
-- 示例：行内 \\(\\boldsymbol{D}\\)，独立 \\[\\nabla \\times \\boldsymbol{E} = -\\frac{\\partial \\boldsymbol{B}}{\\partial t}\\]`
+数学公式格式要求（严格遵守）：
+1. 行内公式用 \\(...\\) 包裹，独立公式用 \\[...\\] 包裹
+2. 每个公式只写一次，不要用任何其他格式重复输出
+3. 不要用 Unicode 数学符号（如 ×、÷、∂、∇、≈、→），必须用 LaTeX 命令（\\times、\\div、\\partial、\\nabla、\\approx、\\rightarrow）
+4. 不要用普通括号、星号或其他方式包裹公式
+5. 不要用 $...$ 格式
+
+正确示例：
+麦克斯韦方程：\\[\\nabla \\times \\boldsymbol{B} = \\mu_0 \\boldsymbol{J} + \\mu_0 \\varepsilon_0 \\frac{\\partial \\boldsymbol{E}}{\\partial t}\\]
+其中 \\(\\boldsymbol{E}\\) 表示电场强度，\\(\\boldsymbol{B}\\) 表示磁感应强度。`
 
       const apiMessages = [{ role: 'system', content: systemPrompt }, ...contextMessages.map((msg) => {
         const msgScreenshots = msg === userMessage ? screenshots : (msg.screenshotData ? [msg.screenshotData] : [])

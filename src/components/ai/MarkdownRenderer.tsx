@@ -80,7 +80,10 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
 
     const render = (html: string) => {
       if (!ref.current) return
-      const finalHtml = DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'style'] })
+      const finalHtml = DOMPurify.sanitize(html, {
+        ADD_ATTR: ['class', 'style', 'aria-hidden'],
+        ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mtext', 'msqrt', 'mstyle', 'annotation', 'mglyph', 'mspace'],
+      })
       // 流式更新时避免不必要的 innerHTML 替换，保留用户文本选区
       if (ref.current.innerHTML !== finalHtml) {
         ref.current.innerHTML = finalHtml

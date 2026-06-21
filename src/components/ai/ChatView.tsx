@@ -236,13 +236,9 @@ export default function ChatView({
         </div>
       ) : (
         <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
-          {(() => {
-            const lastMsg = session?.messages[session.messages.length - 1]
-            if (lastMsg?.role === 'assistant' && lastMsg.thinkingContent) {
-              return <ThinkingDisplay text={lastMsg.thinkingContent} isStreaming={false} />
-            }
-            return null
-          })()}
+          {session?.thinkingText && (
+            <ThinkingDisplay text={session.thinkingText} isStreaming={false} />
+          )}
 
           {session?.messages.map((message, idx) => {
             const isGeneratingThis = noteGenMsgIdx === idx

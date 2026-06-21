@@ -487,7 +487,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...s.messages, assistantMessage],
               chatState: 'idle',
               streamingText: '',
-              thinkingText: '',
+              thinkingText: fullThinkingText,
               statusText: '',
               updatedAt: Date.now(),
             },
@@ -504,7 +504,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           return {
             sessions: {
               ...state.sessions,
-              [activeSessionId!]: { ...s, chatState: 'idle', streamingText: '', thinkingText: '', statusText: '' },
+              [activeSessionId!]: { ...s, chatState: 'idle', streamingText: '', thinkingText: s.thinkingText, statusText: '' },
             },
             // Only clear controller if it's still ours (not replaced by a newer send)
             abortController: state.abortController === controller ? null : state.abortController,
@@ -569,7 +569,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...session.messages.slice(0, -1), completedMessage],
               chatState: 'idle',
               streamingText: '',
-              thinkingText: '',
+              thinkingText: session.thinkingText,
               statusText: '',
               contextWindow: [...session.contextWindow, completedMessage],
             },
@@ -596,7 +596,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...session.messages, partialMessage],
               chatState: 'idle',
               streamingText: '',
-              thinkingText: '',
+              thinkingText: session.thinkingText,
               statusText: '',
               contextWindow: [...session.contextWindow, partialMessage],
             },
@@ -608,7 +608,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       return {
         sessions: {
           ...state.sessions,
-          [activeSessionId]: { ...session, chatState: 'idle', streamingText: '', thinkingText: '', statusText: '' },
+          [activeSessionId]: { ...session, chatState: 'idle', streamingText: '', thinkingText: session.thinkingText, statusText: '' },
         },
       }
     })

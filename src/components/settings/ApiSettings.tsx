@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { logger } from '../../lib/logger'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useSettingsStore, type ModelConfig, type ProviderCategory } from '../../stores/settingsStore'
@@ -44,12 +44,16 @@ function DefaultModelSelect({ models, activeModelId, onSelect }: {
 function ThinkingTestButton({ config, model, onResult }: {
   config: { apiUrl: string; apiKey: string }
   model: { modelId: string; hasThinking?: boolean }
-  onResult: (ok: boolean) => void
+  onResult: (ok: boolean, msg: string) => void
 }) {
   const [testing, setTesting] = useState(false)
 
   const handleTest = async () => {
     if (testing) return
+    if (!config.apiUrl || !config.apiKey) {
+      onResult(false, '请先填写 API 地址和 Key')
+      return
+    }
     setTesting(true)
     try {
       const res = await fetch(config.apiUrl, {
@@ -60,11 +64,14 @@ function ThinkingTestButton({ config, model, onResult }: {
           messages: [{ role: 'user', content: '1+1=?' }],
           stream: true,
         }),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 80) : ''}`)
+      }
       const reader = res.body?.getReader()
-      if (!reader) throw new Error('No body')
+      if (!reader) throw new Error('响应无内容')
       const decoder = new TextDecoder()
       let hasThinking = false
       let buffer = ''
@@ -90,10 +97,11 @@ function ThinkingTestButton({ config, model, onResult }: {
         if (hasThinking) break
       }
       reader.cancel()
-      onResult(hasThinking)
+      onResult(hasThinking, hasThinking ? '该模型支持思考模式' : '该模型不支持思考模式')
     } catch (err) {
       logger.error('思考模式测试失败', err)
-      onResult(false)
+      const msg = err instanceof Error ? `测试失败: ${err.message}` : '测试失败: 未知错误'
+      onResult(false, msg)
     } finally {
       setTesting(false)
     }
@@ -103,12 +111,13 @@ function ThinkingTestButton({ config, model, onResult }: {
     <button
       onClick={handleTest}
       disabled={testing}
-      className="text-[9px] px-1.5 py-0.5 rounded transition-colors"
+      className="text-[10px] px-2 py-0.5 rounded transition-colors"
       style={{
-        backgroundColor: model.hasThinking ? '#22c55e20' : testing ? '#f3f4f6' : '#f3f4f6',
-        color: model.hasThinking ? '#16a34a' : '#9ca3af',
+        backgroundColor: model.hasThinking ? '#22c55e15' : '#f9fafb',
+        color: model.hasThinking ? '#16a34a' : '#6b7280',
+        border: `1px solid ${model.hasThinking ? '#bbf7d0' : '#e5e7eb'}`,
       }}
-      title={model.hasThinking ? '已支持思考，点击重新测试' : '点击测试模型是否支持思考模式'}
+      title={model.hasThinking ? '已标记支持思考，点击重新测试' : '测试该模型是否支持思考/推理模式'}
     >
       {testing ? '测试中...' : model.hasThinking ? '思考 ✓' : '测试思考'}
     </button>
@@ -137,6 +146,13 @@ export default function ApiSettings() {
   const [fetchTargetId, setFetchTargetId] = useState<string | null>(null)
   const [showApiKey, setShowApiKey] = useState<Record<string, boolean>>({})
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [modelTestMsg, setModelTestMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  useEffect(() => {
+    if (!modelTestMsg) return
+    const t = setTimeout(() => setModelTestMsg(null), 3000)
+    return () => clearTimeout(t)
+  }, [modelTestMsg])
 
   const fetchModels = async (apiUrl: string, apiKey: string, configId: string) => {
     if (!apiUrl || !apiKey) return
@@ -413,68 +429,79 @@ export default function ApiSettings() {
                         </div>
 
                         {config.models.map((m) => (
-                          <div key={m.id} className="flex items-center gap-2 py-1.5 border-b border-gray-100 last:border-0">
-                            <input
-                              type="text"
-                              value={m.name}
-                              onChange={(e) => updateModelInConfig(config.id, m.id, { name: e.target.value })}
-                              className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs"
-                              placeholder="显示名称"
-                            />
-                            <input
-                              type="text"
-                              value={m.modelId}
-                              onChange={(e) => updateModelInConfig(config.id, m.id, { modelId: e.target.value })}
-                              className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs"
-                              placeholder="模型 ID"
-                            />
-                            <input
-                              type="number"
-                              min={1}
-                              value={m.maxContextTokens}
-                              onChange={(e) => {
-                                const val = parseInt(e.target.value, 10)
-                                updateModelInConfig(config.id, m.id, { maxContextTokens: isNaN(val) || val < 1 ? DEFAULT_MAX_TOKENS : val })
-                              }}
-                              className="w-20 px-2 py-1 border border-gray-200 rounded text-xs"
-                              placeholder="Token"
-                            />
-                            <div className="flex gap-0.5">
-                              <button
-                                onClick={() => updateModelInConfig(config.id, m.id, { hasVision: !m.hasVision })}
-                                className="text-[9px] px-1 py-0.5 rounded transition-colors"
-                                style={{
-                                  backgroundColor: m.hasVision ? '#8b5cf620' : '#f3f4f6',
-                                  color: m.hasVision ? '#8b5cf6' : '#9ca3af',
+                          <div key={m.id} className="border-b border-gray-100 last:border-0 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={m.name}
+                                onChange={(e) => updateModelInConfig(config.id, m.id, { name: e.target.value })}
+                                className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs"
+                                placeholder="显示名称"
+                              />
+                              <input
+                                type="text"
+                                value={m.modelId}
+                                onChange={(e) => updateModelInConfig(config.id, m.id, { modelId: e.target.value })}
+                                className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs"
+                                placeholder="模型 ID"
+                              />
+                              <input
+                                type="number"
+                                min={1}
+                                value={m.maxContextTokens}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10)
+                                  updateModelInConfig(config.id, m.id, { maxContextTokens: isNaN(val) || val < 1 ? DEFAULT_MAX_TOKENS : val })
                                 }}
-                                title="支持图片识别"
-                              >
-                                视觉
-                              </button>
+                                className="w-20 px-2 py-1 border border-gray-200 rounded text-xs"
+                                placeholder="Token"
+                              />
+                              <div className="flex gap-0.5">
+                                <button
+                                  onClick={() => updateModelInConfig(config.id, m.id, { hasVision: !m.hasVision })}
+                                  className="text-[9px] px-1 py-0.5 rounded transition-colors"
+                                  style={{
+                                    backgroundColor: m.hasVision ? '#8b5cf620' : '#f3f4f6',
+                                    color: m.hasVision ? '#8b5cf6' : '#9ca3af',
+                                  }}
+                                  title="支持图片识别"
+                                >
+                                  视觉
+                                </button>
+                                <button
+                                  onClick={() => updateModelInConfig(config.id, m.id, { audioCapable: !m.audioCapable })}
+                                  className="text-[9px] px-1 py-0.5 rounded transition-colors"
+                                  style={{
+                                    backgroundColor: m.audioCapable ? '#f59e0b20' : '#f3f4f6',
+                                    color: m.audioCapable ? '#f59e0b' : '#9ca3af',
+                                  }}
+                                  title="支持音频转文字"
+                                >
+                                  音频
+                                </button>
+                              </div>
                               <button
-                                onClick={() => updateModelInConfig(config.id, m.id, { audioCapable: !m.audioCapable })}
-                                className="text-[9px] px-1 py-0.5 rounded transition-colors"
-                                style={{
-                                  backgroundColor: m.audioCapable ? '#f59e0b20' : '#f3f4f6',
-                                  color: m.audioCapable ? '#f59e0b' : '#9ca3af',
-                                }}
-                                title="支持音频转文字"
+                                onClick={() => removeModelFromConfig(config.id, m.id)}
+                                className="text-gray-400 hover:text-red-500 p-0.5"
+                                aria-label="删除模型"
                               >
-                                音频
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                               </button>
                             </div>
-                            <ThinkingTestButton
-                              config={config}
-                              model={m}
-                              onResult={(ok) => updateModelInConfig(config.id, m.id, { hasThinking: ok })}
-                            />
-                            <button
-                              onClick={() => removeModelFromConfig(config.id, m.id)}
-                              className="text-gray-400 hover:text-red-500 p-0.5"
-                              aria-label="删除模型"
-                            >
-                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
+                            {/* 次级操作行：测试思考 */}
+                            <div className="flex items-center gap-2 mt-1 ml-1">
+                              <ThinkingTestButton
+                                config={config}
+                                model={m}
+                                onResult={(ok, msg) => {
+                                  updateModelInConfig(config.id, m.id, { hasThinking: ok })
+                                  setModelTestMsg({ text: msg, type: ok ? 'success' : 'error' })
+                                }}
+                              />
+                              {m.hasThinking && (
+                                <span className="text-[10px] text-green-600">已标记支持思考</span>
+                              )}
+                            </div>
                           </div>
                         ))}
 
@@ -527,6 +554,19 @@ export default function ApiSettings() {
           </div>
         )}
       </div>
+
+      {/* 测试结果提示 */}
+      {modelTestMsg && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg text-sm z-50 transition-all ${
+            modelTestMsg.type === 'success'
+              ? 'bg-green-50 text-green-700 border border-green-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
+          }`}
+        >
+          {modelTestMsg.text}
+        </div>
+      )}
 
       <ConfirmDialog
         open={!!deleteConfirmId}

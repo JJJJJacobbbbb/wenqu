@@ -12,6 +12,14 @@ export default function ThinkingDisplay({ text, isStreaming, statusText }: Think
   const containerRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(true)
 
+  // 思考结束时自动收起
+  useEffect(() => {
+    if (!isStreaming && text) {
+      const t = setTimeout(() => setExpanded(false), 300)
+      return () => clearTimeout(t)
+    }
+  }, [isStreaming, text])
+
   // 流式+展开时自动滚动到底部
   useEffect(() => {
     if (isStreaming && expanded && containerRef.current) {
@@ -23,8 +31,10 @@ export default function ThinkingDisplay({ text, isStreaming, statusText }: Think
 
   const lines = text.split('\n')
 
-  // 思考中+展开：只显示最后 6 行；思考结束后展开：显示全部
-  const displayLines = isStreaming && expanded ? lines.slice(-STREAM_LINES) : lines
+  // 流式+展开：最后 6 行；结束后+展开：全部；收起：不显示内容
+  const displayLines = isStreaming && expanded
+    ? lines.slice(-STREAM_LINES)
+    : expanded ? lines : []
   const hiddenCount = isStreaming && expanded ? lines.length - displayLines.length : 0
 
   return (
@@ -42,7 +52,7 @@ export default function ThinkingDisplay({ text, isStreaming, statusText }: Think
         {isStreaming ? '思考中...' : '已思考'}
       </button>
 
-      {expanded && (
+      {expanded && displayLines.length > 0 && (
         <div
           ref={containerRef}
           className="mt-1 p-2 bg-purple-50 rounded text-xs text-gray-600 font-mono max-h-48 overflow-y-auto"
@@ -56,15 +66,6 @@ export default function ThinkingDisplay({ text, isStreaming, statusText }: Think
           {isStreaming && (
             <span className="inline-block w-1.5 h-3 bg-purple-400 animate-pulse ml-0.5" />
           )}
-        </div>
-      )}
-
-      {!expanded && !isStreaming && lines.length > 3 && (
-        <div className="mt-1 p-2 bg-purple-50 rounded text-xs text-gray-500 font-mono">
-          <div className="text-purple-300 text-[10px] mb-1">... 共 {lines.length} 行</div>
-          {lines.slice(-3).map((line, i) => (
-            <div key={i} className="whitespace-pre-wrap leading-relaxed truncate">{line || '\u00A0'}</div>
-          ))}
         </div>
       )}
 

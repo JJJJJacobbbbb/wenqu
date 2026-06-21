@@ -41,7 +41,12 @@ function DefaultModelSelect({ models, activeModelId, onSelect }: {
 }
 
 async function testThinking(apiUrl: string, apiKey: string, modelId: string): Promise<boolean> {
-  const res = await fetch(apiUrl, {
+  // 确保 URL 指向 chat/completions 端点
+  let url = apiUrl.trim()
+  if (!url.endsWith('/chat/completions')) {
+    url = url.replace(/\/+$/, '') + '/chat/completions'
+  }
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: modelId, messages: [{ role: 'user', content: '1+1=?' }], stream: true }),
@@ -96,6 +101,7 @@ export default function ApiSettings() {
   const [showApiKey, setShowApiKey] = useState<Record<string, boolean>>({})
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [modelTestMsg, setModelTestMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [testingThinking, setTestingThinking] = useState<string | null>(null) // model id being tested
 
   useEffect(() => {
     if (!modelTestMsg) return
@@ -414,16 +420,24 @@ export default function ApiSettings() {
                               </button>
                             </div>
                             {/* 能力标签 */}
-                            <div className="flex items-center gap-1 mt-1 ml-1 flex-wrap">
+                            <div className="flex items-center gap-1.5 mt-1.5">
                               <button
                                 onClick={() => updateModelInConfig(config.id, m.id, { hasVision: !m.hasVision })}
-                                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${m.hasVision ? 'bg-purple-50 text-purple-600 border-purple-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                                className={`px-2 py-1 text-[11px] font-medium rounded-md border cursor-pointer transition-all ${
+                                  m.hasVision
+                                    ? 'bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-200'
+                                    : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100 hover:text-gray-600'
+                                }`}
                               >
                                 视觉
                               </button>
                               <button
                                 onClick={() => updateModelInConfig(config.id, m.id, { audioCapable: !m.audioCapable })}
-                                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${m.audioCapable ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                                className={`px-2 py-1 text-[11px] font-medium rounded-md border cursor-pointer transition-all ${
+                                  m.audioCapable
+                                    ? 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200'
+                                    : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100 hover:text-gray-600'
+                                }`}
                               >
                                 音频
                               </button>
@@ -433,6 +447,7 @@ export default function ApiSettings() {
                                     setModelTestMsg({ text: '请先填写 API 地址和 Key', type: 'error' })
                                     return
                                   }
+                                  setTestingThinking(m.id)
                                   try {
                                     const ok = await testThinking(config.apiUrl, config.apiKey, m.modelId)
                                     updateModelInConfig(config.id, m.id, { hasThinking: ok })
@@ -440,12 +455,21 @@ export default function ApiSettings() {
                                   } catch (err) {
                                     const msg = err instanceof Error ? err.message : '未知错误'
                                     setModelTestMsg({ text: `测试失败: ${msg}`, type: 'error' })
+                                  } finally {
+                                    setTestingThinking(null)
                                   }
                                 }}
-                                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${m.hasThinking ? 'bg-green-50 text-green-600 border-green-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                                disabled={testingThinking === m.id}
+                                className={`px-2 py-1 text-[11px] font-medium rounded-md border cursor-pointer transition-all ${
+                                  testingThinking === m.id
+                                    ? 'bg-gray-100 text-gray-400 border-gray-200 animate-pulse'
+                                    : m.hasThinking
+                                      ? 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200'
+                                      : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100 hover:text-gray-600'
+                                }`}
                                 title="点击测试模型是否支持思考模式"
                               >
-                                {m.hasThinking ? '思考 ✓' : '思考'}
+                                {testingThinking === m.id ? '测试中...' : m.hasThinking ? '思考 ✓' : '思考'}
                               </button>
                             </div>
                           </div>

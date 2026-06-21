@@ -13,6 +13,7 @@ export interface Message {
   type: 'text' | 'screenshot' | 'file'
   screenshotData?: string
   fileName?: string
+  thinkingContent?: string
 }
 
 export interface AiSession {
@@ -23,6 +24,7 @@ export interface AiSession {
   contextWindow: Message[]  // 当前题目的上下文（用于 API 调用）
   chatState: 'idle' | 'thinking' | 'streaming' | 'error'
   streamingText: string
+  thinkingText: string
   error: string | null
   createdAt: number
   updatedAt: number
@@ -105,6 +107,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       contextWindow: [],
       chatState: 'idle',
       streamingText: '',
+      thinkingText: '',
       error: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -120,6 +123,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   switchSession: (sessionId) => {
+    if (!get().sessions[sessionId]) return
     set({ activeSessionId: sessionId })
     debouncedSessionSave()
   },
@@ -150,6 +154,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   sendMessage: async (content, screenshotData) => {
+    if (!content.trim() && !(Array.isArray(screenshotData) ? screenshotData : screenshotData ? [screenshotData] : []).length) return
     if (sendMessageLock) {
       set({ messageDropped: true })
       setTimeout(() => set({ messageDropped: false }), 2000)
@@ -204,6 +209,7 @@ export const useAiStore = create<AiState>((set, get) => ({
             messages: [...session.messages, userMessage],
             chatState: 'thinking',
             streamingText: '',
+      thinkingText: '',
             error: null,
             name: session.messages.length === 0 ? generateSessionName(content) : session.name,
             updatedAt: Date.now(),
@@ -262,65 +268,22 @@ export const useAiStore = create<AiState>((set, get) => ({
       const session = get().sessions[activeSessionId!]
       if (!session) return
 
-      // 上下文管理：识别新题目清空上下文，单题内用压缩
-      // 判断是否为新题目：不含追问关键词 且 长度 > 15 字符
-      const followUpWords = ['这', '那', '上面', '刚才', '继续', '为什么', '怎么', '如何', '请解释', '详细', '例子', '不懂', '明白', '还是', '可是', '但是', '然后', '接着', '补充', '具体']
-      const isFollowUp = session.contextWindow.length > 0 && (
-        content.length < 15 ||
-        followUpWords.some((w) => content.includes(w))
-      )
+      // 上下文管理：滑动窗口，保留首条消息
+      // 用模型上限的 60% 作为实际阈值，避免"中间遗失"导致注意力下降
+      const modelLimit = model.maxContextTokens || 128000
+      const maxChars = modelLimit * 2 * 0.6 // ≈2字符/token × 60%
 
-      let contextMessages: Message[]
-      if (isFollowUp) {
-        // 追问：在当前上下文基础上添加
-        const updated = [...session.contextWindow, userMessage]
-        // 按 64k token 估算（≈128k 字符），超过则让 AI 总结压缩
-        const MAX_CHARS = 128000
-        const totalChars = updated.reduce((sum, m) => sum + m.content.length + (m.screenshotData ? 500 : 0), 0)
+      // 追加新消息到上下文
+      const updated = [...session.contextWindow, userMessage]
 
-        if (totalChars <= MAX_CHARS) {
-          contextMessages = updated
-        } else {
-          // 需要压缩：保留首条 + 最近几条，中间让 AI 总结
-          const RECENT_KEEP = 6
-          const first = updated[0]
-          const middle = updated.slice(1, -(RECENT_KEEP))
-          const tail = updated.slice(-RECENT_KEEP)
+      // 滑动窗口截断：保留首条（index 0），从旧消息开始丢弃
+      let contextMessages = updated
+      let totalChars = contextMessages.reduce((sum, m) => sum + m.content.length + (m.screenshotData ? 500 : 0), 0)
 
-          // 用同一模型总结中间部分
-          const summaryText = middle.map((m) => `${m.role === 'user' ? '学生' : '老师'}：${m.content}`).join('\n')
-          const summarizeBody = {
-            model: model.modelId,
-            messages: [
-              { role: 'system', content: '请用中文简要总结以下对话的核心内容，保留关键问题、解题步骤和结论，控制在500字以内。只输出总结内容，不要多余的话。' },
-              { role: 'user', content: summaryText },
-            ],
-            stream: false,
-          }
-
-          try {
-            const res = await fetch(config.apiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
-              body: JSON.stringify(summarizeBody),
-              signal: AbortSignal.timeout(15000),
-            })
-            if (res.ok) {
-              const data = await res.json()
-              const summary = data.choices?.[0]?.message?.content || '（摘要生成失败）'
-              const summaryMsg: Message = { id: generateId('msg'), role: 'assistant', content: `[对话摘要] ${summary}`, timestamp: Date.now(), type: 'text' }
-              contextMessages = [first, summaryMsg, ...tail]
-            } else {
-              // 总结失败，fallback 为首条 + 最近几条
-              contextMessages = [first, ...tail]
-            }
-          } catch {
-            contextMessages = [first, ...tail]
-          }
-        }
-      } else {
-        // 新题目：清空上一题上下文，从当前消息开始
-        contextMessages = [userMessage]
+      while (totalChars > maxChars && contextMessages.length > 2) {
+        const removed = contextMessages[1] // 跳过 index 0（首条消息）
+        contextMessages = [contextMessages[0], ...contextMessages.slice(2)]
+        totalChars -= removed.content.length + (removed.screenshotData ? 500 : 0)
       }
 
       // 更新 session 的 contextWindow
@@ -435,9 +398,23 @@ export const useAiStore = create<AiState>((set, get) => ({
 
       const decoder = new TextDecoder()
       let fullText = ''
+      let fullThinkingText = ''
       let buffer = ''
       let done = false
       let dataLines: string[] = []
+
+      const updateStreamState = () => {
+        set((state) => {
+          const s = state.sessions[activeSessionId!]
+          if (!s) return state
+          return {
+            sessions: {
+              ...state.sessions,
+              [activeSessionId!]: { ...s, chatState: 'streaming', streamingText: fullText, thinkingText: fullThinkingText },
+            },
+          }
+        })
+      }
 
       while (!done) {
         const result = await reader.read()
@@ -459,20 +436,11 @@ export const useAiStore = create<AiState>((set, get) => ({
 
             try {
               const parsed = JSON.parse(data)
-              const delta = parsed.choices?.[0]?.delta?.content
-              if (delta) {
-                fullText += delta
-                set((state) => {
-                  const s = state.sessions[activeSessionId!]
-                  if (!s) return state
-                  return {
-                    sessions: {
-                      ...state.sessions,
-                      [activeSessionId!]: { ...s, chatState: 'streaming', streamingText: fullText },
-                    },
-                  }
-                })
-              }
+              const delta = parsed.choices?.[0]?.delta
+              const reasoning = delta?.reasoning_content || delta?.thinking_content
+              const content = delta?.content
+              if (reasoning) { fullThinkingText += reasoning; updateStreamState() }
+              if (content) { fullText += content; updateStreamState() }
             } catch { /* ignore parse errors */ }
           }
         }
@@ -483,20 +451,11 @@ export const useAiStore = create<AiState>((set, get) => ({
           else {
             try {
               const parsed = JSON.parse(data)
-              const delta = parsed.choices?.[0]?.delta?.content
-              if (delta) {
-                fullText += delta
-                set((state) => {
-                  const s = state.sessions[activeSessionId!]
-                  if (!s) return state
-                  return {
-                    sessions: {
-                      ...state.sessions,
-                      [activeSessionId!]: { ...s, chatState: 'streaming', streamingText: fullText },
-                    },
-                  }
-                })
-              }
+              const delta = parsed.choices?.[0]?.delta
+              const reasoning = delta?.reasoning_content || delta?.thinking_content
+              const content = delta?.content
+              if (reasoning) { fullThinkingText += reasoning; updateStreamState() }
+              if (content) { fullText += content; updateStreamState() }
             } catch { /* ignore parse errors */ }
           }
         }
@@ -508,6 +467,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         content: fullText || '(无响应内容)',
         timestamp: Date.now(),
         type: 'text',
+        thinkingContent: fullThinkingText || undefined,
       }
 
       set((state) => {
@@ -521,6 +481,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...s.messages, assistantMessage],
               chatState: 'idle',
               streamingText: '',
+      thinkingText: '',
               updatedAt: Date.now(),
             },
           },
@@ -536,7 +497,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           return {
             sessions: {
               ...state.sessions,
-              [activeSessionId!]: { ...s, chatState: 'idle', streamingText: '' },
+              [activeSessionId!]: { ...s, chatState: 'idle', streamingText: '', thinkingText: '' },
             },
             // Only clear controller if it's still ours (not replaced by a newer send)
             abortController: state.abortController === controller ? null : state.abortController,
@@ -592,7 +553,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
       // Case 1: Last message is assistant with streaming text → save partial content
       if (lastMessage && lastMessage.role === 'assistant' && session.streamingText) {
-        const completedMessage: Message = { ...lastMessage, content: session.streamingText }
+        const completedMessage: Message = { ...lastMessage, content: session.streamingText, thinkingContent: session.thinkingText || undefined }
         return {
           sessions: {
             ...state.sessions,
@@ -601,6 +562,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...session.messages.slice(0, -1), completedMessage],
               chatState: 'idle',
               streamingText: '',
+      thinkingText: '',
               contextWindow: [...session.contextWindow, completedMessage],
             },
           },
@@ -616,6 +578,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           content: session.streamingText,
           timestamp: Date.now(),
           type: 'text',
+          thinkingContent: session.thinkingText || undefined,
         }
         return {
           sessions: {
@@ -625,6 +588,7 @@ export const useAiStore = create<AiState>((set, get) => ({
               messages: [...session.messages, partialMessage],
               chatState: 'idle',
               streamingText: '',
+      thinkingText: '',
               contextWindow: [...session.contextWindow, partialMessage],
             },
           },
@@ -635,7 +599,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       return {
         sessions: {
           ...state.sessions,
-          [activeSessionId]: { ...session, chatState: 'idle', streamingText: '' },
+          [activeSessionId]: { ...session, chatState: 'idle', streamingText: '', thinkingText: '' },
         },
       }
     })
@@ -686,6 +650,7 @@ export const useAiStore = create<AiState>((set, get) => ({
             contextWindow: (s.contextWindow as Message[]) || [],
             chatState: 'idle',
             streamingText: '',
+      thinkingText: '',
             error: null,
             createdAt: Number(s.createdAt) || Date.now(),
             updatedAt: Number(s.updatedAt) || Date.now(),
@@ -709,7 +674,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       for (const [id, session] of Object.entries(sessions)) {
         // 流式中的会话保存为 idle，避免丢失
         const base = session.chatState === 'streaming' || session.chatState === 'thinking'
-          ? { ...session, chatState: 'idle' as const, streamingText: '' }
+          ? { ...session, chatState: 'idle' as const, streamingText: '', thinkingText: '' }
           : session
         // contextWindow 中的截图已在 messages 中保存，去掉避免 localStorage 双倍占用
         saveableSessions[id] = {

@@ -4,6 +4,7 @@ import {
   DialogSaveOptions,
   ScreenBounds,
 } from './types'
+import { logger } from '../logger'
 
 class BrowserHost implements DesktopHost {
   kind: 'browser' = 'browser'
@@ -18,30 +19,30 @@ class BrowserHost implements DesktopHost {
   }
 
   async invoke(_channel: string, ..._args: unknown[]): Promise<unknown> {
-    console.warn('BrowserHost: invoke not supported')
+    logger.warn('BrowserHost: invoke not supported')
     return undefined
   }
 
   dialogs = {
     open: async (_options?: DialogOpenOptions): Promise<string[]> => {
-      console.warn('BrowserHost: dialogs.open not supported')
+      logger.warn('BrowserHost: dialogs.open not supported')
       return []
     },
     save: async (_options?: DialogSaveOptions): Promise<string> => {
-      console.warn('BrowserHost: dialogs.save not supported')
+      logger.warn('BrowserHost: dialogs.save not supported')
       return ''
     },
   }
 
   window = {
     minimize: async (): Promise<void> => {
-      console.warn('BrowserHost: window.minimize not supported')
+      logger.warn('BrowserHost: window.minimize not supported')
     },
     toggleMaximize: async (): Promise<void> => {
-      console.warn('BrowserHost: window.toggleMaximize not supported')
+      logger.warn('BrowserHost: window.toggleMaximize not supported')
     },
     close: async (): Promise<void> => {
-      console.warn('BrowserHost: window.close not supported')
+      logger.warn('BrowserHost: window.close not supported')
     },
     isMaximized: async (): Promise<boolean> => {
       return false
@@ -50,11 +51,11 @@ class BrowserHost implements DesktopHost {
 
   screenshot = {
     captureRegion: async (_bounds: ScreenBounds): Promise<string> => {
-      console.warn('BrowserHost: screenshot.captureRegion not supported')
+      logger.warn('BrowserHost: screenshot.captureRegion not supported')
       return ''
     },
     startRegionSelect: async (): Promise<ScreenBounds> => {
-      console.warn('BrowserHost: screenshot.startRegionSelect not supported')
+      logger.warn('BrowserHost: screenshot.startRegionSelect not supported')
       return { x: 0, y: 0, width: 0, height: 0 }
     },
   }
@@ -70,7 +71,7 @@ class BrowserHost implements DesktopHost {
 
   events = {
     listen: async <T>(_eventName: string, _handler: (payload: T) => void): Promise<() => void> => {
-      console.warn('BrowserHost: events.listen not supported')
+      logger.warn('BrowserHost: events.listen not supported')
       return () => {}
     },
   }
@@ -78,30 +79,30 @@ class BrowserHost implements DesktopHost {
   shell = {
     openExternal: async (url: string): Promise<void> => {
       if (!/^https?:\/\//i.test(url)) {
-        console.warn('BrowserHost: blocked non-HTTP URL:', url)
+        logger.warn(`BrowserHost: blocked non-HTTP URL: ${url}`)
         return
       }
       window.open(url, '_blank')
     },
     openPath: async (_path: string): Promise<void> => {
-      console.warn('BrowserHost: shell.openPath not supported')
+      logger.warn('BrowserHost: shell.openPath not supported')
     },
   }
 
   file = {
     read: async (_filePath: string): Promise<ArrayBuffer> => {
-      console.warn('BrowserHost: file.read not supported')
+      logger.warn('BrowserHost: file.read not supported')
       return new ArrayBuffer(0)
     },
     readText: async (_filePath: string): Promise<string> => {
-      console.warn('BrowserHost: file.readText not supported')
+      logger.warn('BrowserHost: file.readText not supported')
       return ''
     },
     write: async (_filePath: string, _data: ArrayBuffer | string): Promise<void> => {
-      console.warn('BrowserHost: file.write not supported')
+      logger.warn('BrowserHost: file.write not supported')
     },
     list: async (_dirPath: string): Promise<string[]> => {
-      console.warn('BrowserHost: file.list not supported')
+      logger.warn('BrowserHost: file.list not supported')
       return []
     },
   }

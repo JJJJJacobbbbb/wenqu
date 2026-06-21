@@ -2,6 +2,9 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useAiStore } from '../../stores/aiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useDocumentStore } from '../../stores/documentStore'
+import { useShallow } from 'zustand/react/shallow'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { noDragRegion } from '../../lib/styles'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { recordAndTranscribe, isVoiceAvailable } from '../../lib/whisper'
 import { logger } from '../../lib/logger'
@@ -13,9 +16,27 @@ interface ChatInputProps {
 
 export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps = {}) {
   const [input, setInput] = useState('')
-  const { sendMessage, getActiveSession, stopGeneration, pendingScreenshots, addPendingScreenshot, removePendingScreenshot, clearPendingScreenshots, thinkingMode, setThinkingMode, messageDropped } = useAiStore()
-  const { apiConfigs, setDefaultModel, getActiveModel } = useSettingsStore()
-  const { selectionMode, toggleSelectionMode } = useDocumentStore()
+  const { sendMessage, getActiveSession, stopGeneration, pendingScreenshots, addPendingScreenshot, removePendingScreenshot, clearPendingScreenshots, thinkingMode, setThinkingMode, messageDropped } = useAiStore(useShallow((s) => ({
+    sendMessage: s.sendMessage,
+    getActiveSession: s.getActiveSession,
+    stopGeneration: s.stopGeneration,
+    pendingScreenshots: s.pendingScreenshots,
+    addPendingScreenshot: s.addPendingScreenshot,
+    removePendingScreenshot: s.removePendingScreenshot,
+    clearPendingScreenshots: s.clearPendingScreenshots,
+    thinkingMode: s.thinkingMode,
+    setThinkingMode: s.setThinkingMode,
+    messageDropped: s.messageDropped,
+  })))
+  const { apiConfigs, setDefaultModel, getActiveModel } = useSettingsStore(useShallow((s) => ({
+    apiConfigs: s.apiConfigs,
+    setDefaultModel: s.setDefaultModel,
+    getActiveModel: s.getActiveModel,
+  })))
+  const { selectionMode, toggleSelectionMode } = useDocumentStore(useShallow((s) => ({
+    selectionMode: s.selectionMode,
+    toggleSelectionMode: s.toggleSelectionMode,
+  })))
   const session = getActiveSession()
   const isGenerating = session?.chatState === 'thinking' || session?.chatState === 'streaming'
   const hasVisionModel = useSettingsStore.getState().hasVisionModel()
@@ -40,16 +61,21 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
     if (audioPreviewRef.current?.url) URL.revokeObjectURL(audioPreviewRef.current.url)
   }, [])
 
-  // 关闭模型下拉
+  // 监听外部设置输入内容的自定义事件（用于 starter prompts）
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
-        setModelOpen(false)
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (typeof detail === 'string') {
+        setInput(detail)
+        textareaRef.current?.focus()
       }
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    window.addEventListener('chat:set-input', handler)
+    return () => window.removeEventListener('chat:set-input', handler)
   }, [])
+
+  // 关闭模型下拉
+  useClickOutside(modelDropdownRef, useCallback(() => setModelOpen(false), []))
 
   // 收集所有可用模型
   const allModels = useMemo(() =>
@@ -146,6 +172,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
             <button
               onClick={() => setPreviewImage(null)}
               className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg hover:bg-gray-100"
+              aria-label="关闭预览"
             >
               <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -211,6 +238,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
               setAudioPreview(null)
             }}
             className="text-gray-400 hover:text-red-500 p-0.5"
+            aria-label="删除录音"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -240,7 +268,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
       />
 
       {/* 底部工具栏: 模型选择 思考 | 框选 语音 发送 */}
-      <div className="flex items-center justify-between" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div className="flex items-center justify-between" style={noDragRegion}>
         <div className="flex items-center gap-1">
           {/* ---- 模型选择 ---- */}
           <div className="relative" ref={modelDropdownRef}>
@@ -291,20 +319,22 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
           </div>
 
           {/* ---- 思考 ---- */}
-          <button
-            onClick={() => setThinkingMode(!thinkingMode)}
-            className={`h-7 px-2 flex items-center gap-0.5 rounded text-[10px] transition-colors ${
-              thinkingMode
-                ? 'bg-purple-100 text-purple-600 border border-purple-200'
-                : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-            }`}
-            title={thinkingMode ? '关闭思考模式' : '思考模式'}
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-            思考
-          </button>
+          {activeModel?.model.hasThinking && (
+            <button
+              onClick={() => setThinkingMode(!thinkingMode)}
+              className={`h-7 px-2 flex items-center gap-0.5 rounded text-[10px] transition-colors ${
+                thinkingMode
+                  ? 'bg-purple-100 text-purple-600 border border-purple-200'
+                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+              }`}
+              title={thinkingMode ? '关闭思考模式' : '思考模式'}
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              思考
+            </button>
+          )}
 
           {isRecording && <span className="text-xs text-red-500 animate-pulse ml-1">录音中...</span>}
           {isTranscribing && !isRecording && <span className="text-xs text-yellow-600 ml-1">识别中...</span>}
@@ -334,6 +364,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
                   : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
               }`}
               title={screenshotMode === 'toggle' ? (selectionMode ? '退出框选' : '框选截图') : '截图'}
+              aria-label={screenshotMode === 'toggle' ? (selectionMode ? '退出框选' : '框选截图') : '截图'}
             >
               {screenshotMode === 'single' ? (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -354,10 +385,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
           {/* ---- 语音 ---- */}
           <button
             onClick={() => {
-              if (voiceDisabled) {
-                alert('语音识别需要在设置中为模型勾选「音频」支持。\n请前往 设置 → AI 模型 编辑。')
-                return
-              }
+              if (voiceDisabled) return
               toggleRecording()
             }}
             disabled={isGenerating || isTranscribing}
@@ -371,6 +399,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
                     : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
             }`}
             title={isRecording ? '停止录音' : isTranscribing ? '识别中...' : voiceDisabled ? '需在设置中标记音频模型' : '语音输入'}
+            aria-label={isRecording ? '停止录音' : isTranscribing ? '识别中...' : voiceDisabled ? '需在设置中标记音频模型' : '语音输入'}
           >
             {isTranscribing ? (
               <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">

@@ -1,7 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
+import { logger } from '../../lib/logger'
+import { useClickOutside } from '../../hooks/useClickOutside'
 import { useSettingsStore, type ModelConfig, type ProviderCategory } from '../../stores/settingsStore'
 import { PROVIDER_PRESETS, CATEGORY_LABELS, CATEGORY_COLORS, type ProviderPreset } from '../../config/providerPresets'
 import { DEFAULT_MAX_TOKENS } from '../../lib/constants'
+import { generateId } from '../../lib/id'
+import ConfirmDialog from '../shared/ConfirmDialog'
 
 type View = 'list' | 'presets' | 'form'
 
@@ -12,11 +16,7 @@ function DefaultModelSelect({ models, activeModelId, onSelect }: {
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
+  useClickOutside(ref, useCallback(() => setOpen(false), []))
   const active = models.find((m) => m.modelId === activeModelId)
   return (
     <div className="relative" ref={ref}>
@@ -41,6 +41,87 @@ function DefaultModelSelect({ models, activeModelId, onSelect }: {
   )
 }
 
+function ThinkingTestButton({ config, model, onResult }: {
+  config: { apiUrl: string; apiKey: string }
+  model: { modelId: string; hasThinking?: boolean }
+  onResult: (ok: boolean) => void
+}) {
+  const [testing, setTesting] = useState(false)
+
+  const handleTest = async () => {
+    if (testing) return
+    setTesting(true)
+    try {
+      const res = await fetch(config.apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
+        body: JSON.stringify({
+          model: model.modelId,
+          messages: [{ role: 'user', content: '1+1=?' }],
+          stream: true,
+        }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No body')
+      const decoder = new TextDecoder()
+      let hasThinking = false
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') break
+          try {
+            const parsed = JSON.parse(data)
+            const delta = parsed.choices?.[0]?.delta
+            if (delta?.reasoning_content || delta?.thinking_content) {
+              hasThinking = true
+              break
+            }
+          } catch { /* ignore */ }
+        }
+        if (hasThinking) break
+      }
+      reader.cancel()
+      onResult(hasThinking)
+    } catch (err) {
+      logger.error('思考模式测试失败', err)
+      onResult(false)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  if (testing) {
+    return (
+      <span className="text-[9px] px-1 py-0.5 rounded bg-gray-100 text-gray-400 animate-pulse">
+        测试中...
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={handleTest}
+      className="text-[9px] px-1 py-0.5 rounded transition-colors"
+      style={{
+        backgroundColor: model.hasThinking ? '#22c55e20' : '#f3f4f6',
+        color: model.hasThinking ? '#16a34a' : '#9ca3af',
+      }}
+      title="测试模型是否支持思考模式"
+    >
+      {model.hasThinking ? '思考✓' : '测试思考'}
+    </button>
+  )
+}
+
 export default function ApiSettings() {
   const {
     apiConfigs,
@@ -61,6 +142,8 @@ export default function ApiSettings() {
   const [modelListLoading, setModelListLoading] = useState(false)
   const [modelError, setModelError] = useState('')
   const [fetchTargetId, setFetchTargetId] = useState<string | null>(null)
+  const [showApiKey, setShowApiKey] = useState<Record<string, boolean>>({})
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const fetchModels = async (apiUrl: string, apiKey: string, configId: string) => {
     if (!apiUrl || !apiKey) return
@@ -128,11 +211,12 @@ export default function ApiSettings() {
       for (const pm of preset.models) {
         if (formData.preselectedModels.includes(pm.modelId)) {
           models.push({
-            id: `model-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: generateId('model'),
             name: pm.name,
             modelId: pm.modelId,
             hasVision: pm.hasVision,
             maxContextTokens: pm.maxContextTokens,
+            hasThinking: pm.hasThinking,
           })
         }
       }
@@ -159,7 +243,7 @@ export default function ApiSettings() {
   }
 
   const handleDelete = (id: string) => {
-    if (confirm('确定删除？')) removeApiConfig(id)
+    setDeleteConfirmId(id)
   }
 
   const handleAddModelFromList = (configId: string, modelId: string) => {
@@ -181,6 +265,7 @@ export default function ApiSettings() {
     const active = getActiveModel()
 
     return (
+      <>
       <div className="max-w-2xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-medium text-gray-800">AI 供应商</h2>
@@ -289,17 +374,37 @@ export default function ApiSettings() {
                         className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm"
                         placeholder="API URL"
                       />
-                      <input
-                        type="password"
-                        value={config.apiKey}
-                        onChange={(e) => updateApiConfig(config.id, { apiKey: e.target.value })}
-                        onBlur={(e) => {
-                          const trimmed = e.target.value.trim()
-                          if (trimmed) updateApiConfig(config.id, { apiKey: trimmed })
-                        }}
-                        className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm"
-                        placeholder="API Key"
-                      />
+                      <div className="relative">
+                        <input
+                          type={showApiKey[config.id] ? 'text' : 'password'}
+                          value={config.apiKey}
+                          onChange={(e) => updateApiConfig(config.id, { apiKey: e.target.value })}
+                          onBlur={(e) => {
+                            const trimmed = e.target.value.trim()
+                            if (trimmed) updateApiConfig(config.id, { apiKey: trimmed })
+                          }}
+                          className="w-full px-3 py-1.5 pr-8 border border-gray-300 rounded text-sm"
+                          placeholder="API Key"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey((prev) => ({ ...prev, [config.id]: !prev[config.id] }))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          title={showApiKey[config.id] ? '隐藏' : '显示'}
+                          aria-label={showApiKey[config.id] ? '隐藏 API Key' : '显示 API Key'}
+                        >
+                          {showApiKey[config.id] ? (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
 
                       {/* 模型列表 */}
                       <div>
@@ -364,10 +469,27 @@ export default function ApiSettings() {
                               >
                                 音频
                               </button>
+                              <button
+                                onClick={() => updateModelInConfig(config.id, m.id, { hasThinking: !m.hasThinking })}
+                                className="text-[9px] px-1 py-0.5 rounded transition-colors"
+                                style={{
+                                  backgroundColor: m.hasThinking ? '#22c55e20' : '#f3f4f6',
+                                  color: m.hasThinking ? '#16a34a' : '#9ca3af',
+                                }}
+                                title="支持思考/推理模式"
+                              >
+                                思考
+                              </button>
+                              <ThinkingTestButton
+                                config={config}
+                                model={m}
+                                onResult={(ok) => updateModelInConfig(config.id, m.id, { hasThinking: ok })}
+                              />
                             </div>
                             <button
                               onClick={() => removeModelFromConfig(config.id, m.id)}
                               className="text-gray-400 hover:text-red-500 p-0.5"
+                              aria-label="删除模型"
                             >
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
@@ -423,6 +545,17 @@ export default function ApiSettings() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteConfirmId}
+        title="删除配置"
+        message="确定要删除此 API 配置吗？"
+        confirmLabel="删除"
+        danger
+        onConfirm={() => { if (deleteConfirmId) removeApiConfig(deleteConfirmId); setDeleteConfirmId(null) }}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
+      </>
     )
   }
 

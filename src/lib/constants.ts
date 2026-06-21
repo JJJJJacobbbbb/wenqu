@@ -9,3 +9,4 @@ export const DEFAULT_MAX_TOKENS = 32000
 // 防抖延迟
 export const SESSION_DEBOUNCE_MS = 500
 export const SETTINGS_DEBOUNCE_MS = 200
+export const NOTES_DEBOUNCE_MS = 300

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { useTabStore } from './stores/tabStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useNoteStore } from './stores/noteStore'
@@ -7,11 +7,13 @@ import { useAiStore } from './stores/aiStore'
 import { getDesktopHost } from './lib/desktopHost'
 import { logger } from './lib/logger'
 import DocumentViewer from './components/document/DocumentViewer'
-import SettingsPage from './components/settings/SettingsPage'
-import NoteList from './components/notes/NoteList'
+import ErrorBoundary from './components/shared/ErrorBoundary'
+
+const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
+const NoteList = lazy(() => import('./components/notes/NoteList'))
 
 function App() {
-  const { activeTabType } = useTabStore()
+  const { activeTabType, openDocument } = useTabStore()
   const openSettings = useTabStore((s) => s.openSettings)
   const loadSettings = useSettingsStore((s) => s.loadFromStorage)
   const loadNotes = useNoteStore((s) => s.loadFromStorage)
@@ -35,32 +37,49 @@ function App() {
     return () => { unmounted = true; cleanup?.() }
   }, [])
 
+  // Escape 键返回文档页
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && activeTabType !== 'document') {
+        openDocument()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeTabType, openDocument])
+
   const isNotesActive = activeTabType === 'notes'
   const isSettingsActive = activeTabType === 'settings'
 
   return (
-    <div className="h-screen bg-gray-50 flex">
-      {/* 主内容区：文档 */}
-      {!isNotesActive && !isSettingsActive && (
-        <div className="flex-1 min-w-0">
-          <DocumentViewer />
-        </div>
-      )}
+    <ErrorBoundary>
+      <div className="h-screen bg-gray-50 flex">
+        {/* 主内容区：文档 */}
+        {!isNotesActive && !isSettingsActive && (
+          <div className="flex-1 min-w-0">
+            <DocumentViewer />
+          </div>
+        )}
 
-      {/* 设置页 */}
-      {isSettingsActive && (
-        <div className="flex-1 min-w-0">
-          <SettingsPage />
-        </div>
-      )}
+        {/* 设置页 */}
+        {isSettingsActive && (
+          <div className="flex-1 min-w-0">
+            <Suspense fallback={<div className="h-full flex items-center justify-center text-gray-400">加载中...</div>}>
+              <SettingsPage />
+            </Suspense>
+          </div>
+        )}
 
-      {/* 笔记页 */}
-      {isNotesActive && (
-        <div className="flex-1 min-w-0">
-          <NoteList />
-        </div>
-      )}
-    </div>
+        {/* 笔记页 */}
+        {isNotesActive && (
+          <div className="flex-1 min-w-0">
+            <Suspense fallback={<div className="h-full flex items-center justify-center text-gray-400">加载中...</div>}>
+              <NoteList />
+            </Suspense>
+          </div>
+        )}
+      </div>
+    </ErrorBoundary>
   )
 }
 

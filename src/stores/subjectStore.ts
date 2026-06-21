@@ -58,6 +58,7 @@ export const useSubjectStore = create<SubjectState>((set, get) => ({
   },
 
   removeSubject: (id) => {
+    if (id === 'main') return // 不允许删除默认科目
     set((state) => ({
       subjects: state.subjects.filter((s) => s.id !== id),
       currentSubjectId: state.currentSubjectId === id ? null : state.currentSubjectId,

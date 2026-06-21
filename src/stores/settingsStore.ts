@@ -12,6 +12,7 @@ export interface ModelConfig {
   hasVision: boolean
   maxContextTokens: number
   audioCapable?: boolean
+  hasThinking?: boolean
 }
 
 export interface ApiConfig {
@@ -137,9 +138,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   updateApiConfig: (id, config) => {
+    const { id: _ignored, ...safeConfig } = config
     set((state) => ({
       apiConfigs: state.apiConfigs.map((c) =>
-        c.id === id ? { ...c, ...config } : c
+        c.id === id ? { ...c, ...safeConfig } : c
       ),
     }))
     debouncedSave(() => get().saveToStorage())
@@ -200,7 +202,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   updateModelInConfig: (configId, modelId, updates) => {
-    const { id: _id, ...safeUpdates } = updates as Record<string, unknown> & { id?: string }
+    const { id: _id, ...safeUpdates } = updates
     set((state) => ({
       apiConfigs: state.apiConfigs.map((c) =>
         c.id === configId

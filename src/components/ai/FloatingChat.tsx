@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import { useAiStore } from '../../stores/aiStore'
 import { useSubjectStore } from '../../stores/subjectStore'
 import { getDesktopHost } from '../../lib/desktopHost'
@@ -6,12 +6,17 @@ import SubjectPicker from './SubjectPicker'
 import SessionControls from './SessionControls'
 import ChatInput from './ChatInput'
 import ChatMessage from './ChatMessage'
+import ConfirmDialog from '../shared/ConfirmDialog'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { useAutoScroll } from '../../hooks/useAutoScroll'
+import { dragRegion, noDragRegion } from '../../lib/styles'
 
 export default function FloatingChat() {
   const [isPinned, setIsPinned] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
   const [historyFilter, setHistoryFilter] = useState<'all' | 'current'>('all')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef(getDesktopHost())
   const host = hostRef.current
@@ -19,33 +24,13 @@ export default function FloatingChat() {
   const { getActiveSession, clearError, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore()
   const { currentSubjectId, subjects } = useSubjectStore()
   const session = getActiveSession()
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  // 自动滚动到底部
-  const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [])
-
-  useEffect(() => {
-    requestAnimationFrame(scrollToBottom)
-  }, [session?.messages.length, session?.streamingText, session?.chatState, scrollToBottom])
-
-  // 切换会话时滚动到底部
-  useEffect(() => {
-    requestAnimationFrame(scrollToBottom)
-  }, [activeSessionId, scrollToBottom])
+  const { scrollRef, checkScrollPosition } = useAutoScroll(
+    [session?.messages.length, session?.streamingText, session?.thinkingText, session?.chatState],
+    activeSessionId
+  )
 
   // 关闭菜单
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  useClickOutside(menuRef, useCallback(() => setMenuOpen(false), []))
 
   const sessions = useMemo(() => {
     const allSessionList = Object.values(allSessions).sort((a, b) => b.updatedAt - a.updatedAt)
@@ -94,7 +79,7 @@ export default function FloatingChat() {
           {/* 左侧：学科 + 会话控制 */}
           <div
             className="flex items-center flex-1 min-w-0"
-            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+            style={dragRegion}
             onClick={() => {
               // Electron drag 区域会消费 mousedown，导致 textarea 失焦
               // 点击后手动恢复焦点
@@ -104,20 +89,21 @@ export default function FloatingChat() {
               }, 0)
             }}
           >
-            <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <div className="flex items-center gap-1" style={noDragRegion}>
               <SubjectPicker />
               <SessionControls onToggleHistory={() => setShowHistory(!showHistory)} showHistory={showHistory} />
             </div>
           </div>
 
           {/* 右侧：更多菜单 + 关闭 */}
-          <div className="flex items-center gap-0.5 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="flex items-center gap-0.5 shrink-0" style={noDragRegion}>
             {/* 更多菜单 */}
             <div className="relative" ref={menuRef}>
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
                 title="更多"
+                aria-label="更多"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <circle cx="12" cy="5" r="1" fill="currentColor" />
@@ -181,6 +167,7 @@ export default function FloatingChat() {
               onClick={handleClose}
               className="w-7 h-7 flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-500 rounded-md transition-colors"
               title="关闭悬浮窗"
+              aria-label="关闭悬浮窗"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -261,9 +248,10 @@ export default function FloatingChat() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        if (confirm('删除此会话？')) deleteSession(s.id)
+                        setDeleteSessionId(s.id)
                       }}
                       className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0"
+                      aria-label="删除会话"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -277,7 +265,7 @@ export default function FloatingChat() {
         </div>
       ) : (
         <>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
             {session?.messages.map((message) => (
               <div key={message.id}>
                 <ChatMessage message={message} />
@@ -292,6 +280,7 @@ export default function FloatingChat() {
                   content: session.streamingText,
                   timestamp: Date.now(),
                   type: 'text',
+                  thinkingContent: session.thinkingText || undefined,
                 }}
                 isStreaming
               />
@@ -328,19 +317,41 @@ export default function FloatingChat() {
 
             {(!session || session.messages.length === 0) && (
               <div className="h-full flex items-center justify-center text-gray-400">
-                <div className="text-center">
-                  <p className="text-base font-medium">开始提问吧</p>
-                  <p className="text-xs mt-1">可以截图框选或输入文字</p>
+                <div className="text-center max-w-xs">
+                  <p className="text-base font-medium text-gray-600 mb-1">开始提问吧</p>
+                  <p className="text-xs mb-3">可以截图框选或输入文字</p>
+                  <div className="flex flex-wrap gap-1.5 justify-center">
+                    {['解释这个公式', '这道题怎么做', '总结一下'].map((prompt) => (
+                      <button
+                        key={prompt}
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent('chat:set-input', { detail: prompt }))
+                        }}
+                        className="px-2.5 py-1 text-[11px] text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="p-3 bg-white border-t border-gray-200 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="p-3 bg-white border-t border-gray-200 shrink-0" style={noDragRegion}>
             <ChatInput screenshotMode="single" />
           </div>
         </>
       )}
+      <ConfirmDialog
+        open={!!deleteSessionId}
+        title="删除会话"
+        message="确定要删除此会话吗？此操作不可撤销。"
+        confirmLabel="删除"
+        danger
+        onConfirm={() => { if (deleteSessionId) deleteSession(deleteSessionId); setDeleteSessionId(null) }}
+        onCancel={() => setDeleteSessionId(null)}
+      />
     </div>
   )
 }

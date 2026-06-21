@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useAiStore } from '../../stores/aiStore'
+import { noDragRegion } from '../../lib/styles'
 
 interface SessionControlsProps {
   onToggleHistory: () => void
@@ -29,7 +30,7 @@ export default function SessionControls({ onToggleHistory, showHistory }: Sessio
   }, [activeSession, createSession])
 
   return (
-    <div className="flex items-center gap-2 ml-auto relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div className="flex items-center gap-2 ml-auto relative" style={noDragRegion}>
       {/* 提示 */}
       {hint && (
         <div className="absolute -bottom-7 right-0 bg-gray-800 text-white text-[10px] px-2 py-1 rounded shadow-sm whitespace-nowrap z-10">
@@ -53,7 +54,7 @@ export default function SessionControls({ onToggleHistory, showHistory }: Sessio
 
       {/* 当前会话名称 */}
       {activeSession && activeSession.name !== '新会话' && (
-        <span className="text-[10px] text-gray-400 max-w-[80px] truncate hidden sm:inline">
+        <span className="text-[10px] text-gray-400 max-w-[80px] truncate hidden sm:inline" title={activeSession.name}>
           {activeSession.name}
         </span>
       )}

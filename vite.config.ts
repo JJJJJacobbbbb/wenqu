@@ -19,6 +19,13 @@ export default defineConfig({
         screenshot: path.resolve(__dirname, 'screenshot.html'),
         chat: path.resolve(__dirname, 'chat.html'),
       },
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          katex: ['katex'],
+          markdown: ['marked', 'dompurify'],
+        },
+      },
     },
   },
 })

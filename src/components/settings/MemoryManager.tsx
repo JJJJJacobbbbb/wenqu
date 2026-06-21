@@ -3,6 +3,7 @@ import { useSubjectStore } from '../../stores/subjectStore'
 import { useAiStore } from '../../stores/aiStore'
 import { useNoteStore } from '../../stores/noteStore'
 import { NOTE_CATEGORY_LABELS } from '../../stores/noteStore'
+import ConfirmDialog from '../shared/ConfirmDialog'
 
 type ViewMode = 'overview' | 'sessions' | 'notes'
 
@@ -14,8 +15,17 @@ export default function MemoryManager() {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('overview')
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string
+    message: string
+    onConfirm: () => void
+  } | null>(null)
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId)
+
+  // 缓存当前选中科目的会话和笔记列表，避免重复计算
+  const subjectSessions = selectedSubjectId ? listSessionsBySubject(selectedSubjectId) : []
+  const subjectNotes = selectedSubjectId ? notes.filter((n) => n.subjectId === selectedSubjectId) : []
 
   const getSubjectStats = (subjectId: string) => {
     const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
@@ -29,32 +39,43 @@ export default function MemoryManager() {
   }
 
   const handleDeleteSubject = (subjectId: string) => {
-    if (!confirm('确定删除此科目？将同时删除该科目下所有会话和笔记。')) return
-
-    // 删除该科目下所有会话
-    const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
-    subjectSessions.forEach((s) => deleteSession(s.id))
-
-    // 删除该科目下所有笔记
-    const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
-    subjectNotes.forEach((n) => removeNote(n.id))
-
-    // 删除科目
-    removeSubject(subjectId)
-
-    if (selectedSubjectId === subjectId) setSelectedSubjectId(null)
+    setConfirmDialog({
+      title: '删除科目',
+      message: '确定删除此科目？将同时删除该科目下所有会话和笔记。',
+      onConfirm: () => {
+        const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
+        subjectSessions.forEach((s) => deleteSession(s.id))
+        const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
+        subjectNotes.forEach((n) => removeNote(n.id))
+        removeSubject(subjectId)
+        if (selectedSubjectId === subjectId) setSelectedSubjectId(null)
+        setConfirmDialog(null)
+      },
+    })
   }
 
   const handleDeleteAllSessions = (subjectId: string) => {
-    if (!confirm('确定清空此科目所有会话？')) return
-    const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
-    subjectSessions.forEach((s) => deleteSession(s.id))
+    setConfirmDialog({
+      title: '清空会话',
+      message: '确定清空此科目所有会话？',
+      onConfirm: () => {
+        const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
+        subjectSessions.forEach((s) => deleteSession(s.id))
+        setConfirmDialog(null)
+      },
+    })
   }
 
   const handleDeleteAllNotes = (subjectId: string) => {
-    if (!confirm('确定清空此科目所有笔记？')) return
-    const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
-    subjectNotes.forEach((n) => removeNote(n.id))
+    setConfirmDialog({
+      title: '清空笔记',
+      message: '确定清空此科目所有笔记？',
+      onConfirm: () => {
+        const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
+        subjectNotes.forEach((n) => removeNote(n.id))
+        setConfirmDialog(null)
+      },
+    })
   }
 
   // 统计全局数据
@@ -89,6 +110,7 @@ export default function MemoryManager() {
             <button
               onClick={() => setSelectedSubjectId(null)}
               className="text-gray-500 hover:text-gray-700"
+              aria-label="返回列表"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -163,7 +185,7 @@ export default function MemoryManager() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-500">
-                  {listSessionsBySubject(selectedSubjectId).length} 个会话
+                  {subjectSessions.length} 个会话
                 </span>
                 <button
                   onClick={() => handleDeleteAllSessions(selectedSubjectId)}
@@ -173,7 +195,7 @@ export default function MemoryManager() {
                 </button>
               </div>
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {listSessionsBySubject(selectedSubjectId).map((s) => (
+                {subjectSessions.map((s) => (
                   <div key={s.id} className="flex items-center justify-between p-2.5 border border-gray-200 rounded-lg bg-white">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-gray-700 truncate">{s.name}</p>
@@ -182,6 +204,7 @@ export default function MemoryManager() {
                     <button
                       onClick={() => deleteSession(s.id)}
                       className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0"
+                      aria-label="删除会话"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -189,7 +212,7 @@ export default function MemoryManager() {
                     </button>
                   </div>
                 ))}
-                {listSessionsBySubject(selectedSubjectId).length === 0 && (
+                {subjectSessions.length === 0 && (
                   <p className="text-center text-xs text-gray-400 py-6">暂无会话</p>
                 )}
               </div>
@@ -200,7 +223,7 @@ export default function MemoryManager() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-500">
-                  {notes.filter((n) => n.subjectId === selectedSubjectId).length} 条笔记
+                  {subjectNotes.length} 条笔记
                 </span>
                 <button
                   onClick={() => handleDeleteAllNotes(selectedSubjectId)}
@@ -210,7 +233,7 @@ export default function MemoryManager() {
                 </button>
               </div>
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {notes.filter((n) => n.subjectId === selectedSubjectId).map((n) => (
+                {subjectNotes.map((n) => (
                   <div key={n.id} className="flex items-center justify-between p-2.5 border border-gray-200 rounded-lg bg-white">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
@@ -224,6 +247,7 @@ export default function MemoryManager() {
                     <button
                       onClick={() => removeNote(n.id)}
                       className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0"
+                      aria-label="删除笔记"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -231,7 +255,7 @@ export default function MemoryManager() {
                     </button>
                   </div>
                 ))}
-                {notes.filter((n) => n.subjectId === selectedSubjectId).length === 0 && (
+                {subjectNotes.length === 0 && (
                   <p className="text-center text-xs text-gray-400 py-6">暂无笔记</p>
                 )}
               </div>
@@ -298,6 +322,16 @@ export default function MemoryManager() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title || ''}
+        message={confirmDialog?.message || ''}
+        confirmLabel="确认"
+        danger
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   )
 }

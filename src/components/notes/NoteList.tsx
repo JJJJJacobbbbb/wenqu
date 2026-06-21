@@ -3,6 +3,7 @@ import { useNoteStore, NOTE_CATEGORY_LABELS, type NoteCategory, type Note } from
 import { useSubjectStore } from '../../stores/subjectStore'
 import { useTabStore } from '../../stores/tabStore'
 import { exportNotes, exportBySubjectBatch, exportBySubjectCategoryBatch } from '../../lib/noteExport'
+import { dragRegion, noDragRegion } from '../../lib/styles'
 import NoteCard from './NoteCard'
 import WinControls from '../shared/WinControls'
 
@@ -77,14 +78,15 @@ export default function NoteList() {
       {/* Header */}
       <header
         className="bg-white border-b border-gray-200 shrink-0 select-none"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        style={dragRegion}
       >
         <div className="h-10 flex items-center justify-between pl-4">
-          <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="flex items-center gap-3" style={noDragRegion}>
             <button
               onClick={closeNotes}
               className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               title="返回文档"
+              aria-label="返回文档"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
@@ -93,7 +95,7 @@ export default function NoteList() {
             <h1 className="font-semibold text-gray-800">笔记</h1>
           </div>
 
-          <div className="flex items-center gap-1 h-full" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="flex items-center gap-1 h-full" style={noDragRegion}>
             {notes.length > 0 && (
               <div className="relative h-full">
                 <button
@@ -141,7 +143,7 @@ export default function NoteList() {
 
         {/* 搜索栏 */}
         {notes.length > 0 && (
-          <div className="px-4 pb-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="px-4 pb-3" style={noDragRegion}>
             <div className="relative">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -157,6 +159,7 @@ export default function NoteList() {
                 <button
                   onClick={() => setSearchQuery('')}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label="清除搜索"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -169,7 +172,7 @@ export default function NoteList() {
 
         {/* 科目筛选 */}
         {notes.length > 0 && subjectsWithNotes.length > 0 && (
-          <div className="px-4 pb-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="px-4 pb-3" style={noDragRegion}>
             <div className="flex items-center gap-2 overflow-x-auto">
               <button
                 onClick={() => setFilter('all')}

@@ -5,6 +5,7 @@ export interface PresetModel {
   modelId: string
   hasVision: boolean
   maxContextTokens: number
+  hasThinking?: boolean
 }
 
 export interface ProviderPreset {
@@ -30,7 +31,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiUrl: 'https://api.deepseek.com/chat/completions',
     models: [
       { name: 'DeepSeek Chat', modelId: 'deepseek-chat', hasVision: true, maxContextTokens: 64000 },
-      { name: 'DeepSeek R1', modelId: 'deepseek-reasoner', hasVision: true, maxContextTokens: 64000 },
+      { name: 'DeepSeek R1', modelId: 'deepseek-reasoner', hasVision: true, maxContextTokens: 64000, hasThinking: true },
     ],
     category: 'cn',
   },

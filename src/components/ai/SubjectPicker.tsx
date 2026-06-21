@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useSubjectStore } from '../../stores/subjectStore'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { noDragRegion } from '../../lib/styles'
 
 export default function SubjectPicker() {
   const { subjects, currentSubjectId, setCurrentSubject, addSubject } = useSubjectStore()
@@ -8,16 +10,8 @@ export default function SubjectPicker() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false)
-        setNewName('')
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  const closeDropdown = useCallback(() => { setOpen(false); setNewName('') }, [])
+  useClickOutside(dropdownRef, closeDropdown)
 
   const currentSubject = subjects.find((s) => s.id === currentSubjectId) || subjects[0]
 
@@ -43,7 +37,7 @@ export default function SubjectPicker() {
   }
 
   return (
-    <div className="relative" ref={dropdownRef} style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div className="relative" ref={dropdownRef} style={noDragRegion}>
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 px-2 py-1 text-xs rounded hover:bg-gray-100 transition-colors"

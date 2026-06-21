@@ -3,6 +3,7 @@ import ApiSettings from './ApiSettings'
 import SubjectManager from './SubjectManager'
 import MemoryManager from './MemoryManager'
 import { useTabStore } from '../../stores/tabStore'
+import { dragRegion, noDragRegion } from '../../lib/styles'
 import WinControls from '../shared/WinControls'
 
 type SettingsTab = 'api' | 'memory' | 'subjects'
@@ -21,12 +22,13 @@ export default function SettingsPage() {
     <div className="h-screen flex flex-col">
       <header
         className="h-10 bg-white border-b border-gray-200 flex items-center pl-4 justify-between shrink-0 select-none"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        style={dragRegion}
       >
-        <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-center gap-2" style={noDragRegion}>
           <button
             onClick={openDocument}
             className="text-gray-500 hover:text-gray-700"
+            aria-label="返回文档"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />

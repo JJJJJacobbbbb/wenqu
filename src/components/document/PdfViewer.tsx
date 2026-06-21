@@ -173,6 +173,7 @@ export default function PdfViewer({ content }: PdfViewerProps) {
         }
 
         // 释放远离视口的页面，节省内存
+        if (visiblePages.size === 0) return
         const minVisible = Math.min(...visiblePages)
         const maxVisible = Math.max(...visiblePages)
         const RELEASE_DISTANCE = BUFFER_PAGES * 3

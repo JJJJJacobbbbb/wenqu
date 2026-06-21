@@ -87,7 +87,9 @@ export async function exportNotes(notes: Note[], subjects: Subject[], filenamePr
 async function saveFileToFolder(folderPath: string, fileName: string, content: string): Promise<void> {
   const host = getDesktopHost()
   if (host.kind === 'electron') {
-    const filePath = `${folderPath}\\${fileName}`
+    // 防止路径穿越：过滤 fileName 中的 .. 段
+    const safeName = fileName.replace(/\.\./g, '_')
+    const filePath = `${folderPath}\\${safeName}`
     await host.file.write(filePath, content)
   } else {
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
@@ -119,6 +121,7 @@ export async function exportBySubjectBatch(notes: Note[], subjects: Subject[]): 
   const folder = await pickFolder()
   if (!folder) return
 
+  const errors: string[] = []
   const subjectIds = [...new Set(notes.map((n) => n.subjectId))]
   for (const sid of subjectIds) {
     const subjectNotes = notes.filter((n) => n.subjectId === sid)
@@ -126,8 +129,13 @@ export async function exportBySubjectBatch(notes: Note[], subjects: Subject[]): 
     const subject = subjects.find((s) => s.id === sid)
     const name = (subject?.name || '未分类').replace(/[\/\\?%*:|"<>]/g, '_')
     const md = notesToMarkdown(subjectNotes, subjects)
-    await saveFileToFolder(folder, `问渠笔记_${name}.md`, md)
+    try {
+      await saveFileToFolder(folder, `问渠笔记_${name}.md`, md)
+    } catch (e) {
+      errors.push(`导出 ${name} 失败: ${e instanceof Error ? e.message : '未知错误'}`)
+    }
   }
+  if (errors.length > 0) throw new Error(errors.join('\n'))
 }
 
 export async function exportBySubjectCategoryBatch(notes: Note[], subjects: Subject[]): Promise<void> {
@@ -135,6 +143,7 @@ export async function exportBySubjectCategoryBatch(notes: Note[], subjects: Subj
   const folder = await pickFolder()
   if (!folder) return
 
+  const errors: string[] = []
   const subjectIds = [...new Set(notes.map((n) => n.subjectId))]
   for (const sid of subjectIds) {
     const subject = subjects.find((s) => s.id === sid)
@@ -146,7 +155,12 @@ export async function exportBySubjectCategoryBatch(notes: Note[], subjects: Subj
       if (catNotes.length === 0) continue
       const catLabel = (NOTE_CATEGORY_LABELS[cat] || '其他').replace(/[\/\\?%*:|"<>]/g, '_')
       const md = notesToMarkdown(catNotes, subjects)
-      await saveFileToFolder(folder, `问渠笔记_${subjectName}_${catLabel}.md`, md)
+      try {
+        await saveFileToFolder(folder, `问渠笔记_${subjectName}_${catLabel}.md`, md)
+      } catch (e) {
+        errors.push(`导出 ${subjectName}/${catLabel} 失败: ${e instanceof Error ? e.message : '未知错误'}`)
+      }
     }
   }
+  if (errors.length > 0) throw new Error(errors.join('\n'))
 }

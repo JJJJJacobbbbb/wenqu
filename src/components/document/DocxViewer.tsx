@@ -26,7 +26,7 @@ export default function DocxViewer({ content }: DocxViewerProps) {
         // 清空容器
         containerRef.current.innerHTML = ''
 
-        await renderAsync(content, containerRef.current, undefined as Parameters<typeof renderAsync>[2], {
+        await renderAsync(content, containerRef.current, undefined, {
           className: 'docx-body',
           inWrapper: true,
           ignoreWidth: false,

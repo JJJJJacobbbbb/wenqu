@@ -1,4 +1,4 @@
-const isDev = process.env.NODE_ENV === 'development'
+const isDev = import.meta.env.DEV
 
 export const logger = {
   error: (msg: string, err?: unknown) => {

@@ -3,6 +3,7 @@ import { useSettingsStore } from './settingsStore'
 import { NOTE_PROMPTS, SIMILARITY_CHECK_PROMPT, MERGE_PROMPT, type GenerateNoteType } from '../config/notePrompts'
 import { logger } from '../lib/logger'
 import { generateId } from '../lib/id'
+import { NOTES_DEBOUNCE_MS } from '../lib/constants'
 
 export type NoteCategory = 'knowledge' | 'technique' | 'other'
 
@@ -24,24 +25,33 @@ async function callAI(
   if (!/\/chat\/completions\/?$/.test(apiUrl)) {
     apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions'
   }
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: model.modelId,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      stream: false,
-    }),
-  })
-  if (!response.ok) return null
-  const result = await response.json()
-  return result.choices?.[0]?.message?.content || null
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60000)
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: model.modelId,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        stream: false,
+      }),
+      signal: controller.signal,
+    })
+    if (!response.ok) return null
+    const result = await response.json()
+    return result.choices?.[0]?.message?.content || null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export interface Note {
@@ -86,9 +96,19 @@ interface NoteState {
   saveToStorage: () => void
 }
 
-export const useNoteStore = create<NoteState>((set, get) => ({
-  notes: [],
-  filterSubjectId: null,
+export const useNoteStore = create<NoteState>((set, get) => {
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const debouncedSave = () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      saveTimer = null
+      get().saveToStorage()
+    }, NOTES_DEBOUNCE_MS)
+  }
+
+  return {
+    notes: [],
+    filterSubjectId: null,
   filterCategory: null,
   filterType: 'all',
   searchQuery: '',
@@ -105,7 +125,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set((state) => ({
       notes: [fullNote, ...state.notes],
     }))
-    get().saveToStorage()
+    debouncedSave()
     return id
   },
 
@@ -117,14 +137,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           : note
       ),
     }))
-    get().saveToStorage()
+    debouncedSave()
   },
 
   removeNote: (id) => {
     set((state) => ({
       notes: state.notes.filter((note) => note.id !== id),
     }))
-    get().saveToStorage()
+    debouncedSave()
   },
 
   setFilter: (type, subjectId = null) => {
@@ -263,10 +283,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const notes = (parsed.notes || [])
           .filter((n: Record<string, unknown>) => n && n.id && n.title && n.content)
           .map((n: Record<string, unknown>) => {
-            // 迁移旧分类: formula→knowledge, mistake→technique, custom→other
+            // 迁移旧分类: formula→knowledge, custom→other, 其他未知→other
             let category = n.category || 'knowledge'
             if (!ALL_CATEGORIES.includes(category as NoteCategory)) {
-              category = category === 'formula' ? 'knowledge' : category === 'custom' ? 'other' : 'technique'
+              category = category === 'formula' ? 'knowledge' : 'other'
             }
             return {
               ...n,
@@ -291,4 +311,4 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       logger.error('保存笔记失败', e)
     }
   },
-}))
+}})

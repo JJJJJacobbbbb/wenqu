@@ -1,12 +1,16 @@
-import { useEffect, useState, useRef, ReactNode, useCallback, useMemo } from 'react'
+import { useEffect, useState, ReactNode, useCallback, useMemo } from 'react'
 import { useAiStore } from '../../stores/aiStore'
 import { useSubjectStore } from '../../stores/subjectStore'
+import { useShallow } from 'zustand/react/shallow'
+import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { useNoteStore, type Note, type GeneratedNoteData } from '../../stores/noteStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import ChatMessage from './ChatMessage'
 import ChatInput from './ChatInput'
 import SubjectPicker from './SubjectPicker'
 import SessionControls from './SessionControls'
+import Toast from '../shared/Toast'
+import ConfirmDialog from '../shared/ConfirmDialog'
 
 interface ChatViewProps {
   headerExtra?: ReactNode
@@ -27,33 +31,40 @@ export default function ChatView({
   inputStyle,
   screenshotMode = 'toggle',
 }: ChatViewProps) {
-  const { getActiveSession, clearError, createSession, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore()
-  const { currentSubjectId, subjects } = useSubjectStore()
-  const { generateNote, addNote, mergeNote } = useNoteStore()
-  const { getActiveModel, apiConfigs } = useSettingsStore()
+  const { getActiveSession, clearError, createSession, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore(useShallow((s) => ({
+    getActiveSession: s.getActiveSession,
+    clearError: s.clearError,
+    createSession: s.createSession,
+    switchSession: s.switchSession,
+    deleteSession: s.deleteSession,
+    activeSessionId: s.activeSessionId,
+    sessions: s.sessions,
+  })))
+  const { currentSubjectId, subjects } = useSubjectStore(useShallow((s) => ({
+    currentSubjectId: s.currentSubjectId,
+    subjects: s.subjects,
+  })))
+  const { generateNote, addNote, mergeNote } = useNoteStore(useShallow((s) => ({
+    generateNote: s.generateNote,
+    addNote: s.addNote,
+    mergeNote: s.mergeNote,
+  })))
+  const { getActiveModel, apiConfigs } = useSettingsStore(useShallow((s) => ({
+    getActiveModel: s.getActiveModel,
+    apiConfigs: s.apiConfigs,
+  })))
   const session = getActiveSession()
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  // 自动滚动到底部
-  const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [])
-
-  useEffect(() => {
-    // 延迟一帧等 DOM 更新后再滚动
-    requestAnimationFrame(scrollToBottom)
-  }, [session?.messages.length, session?.streamingText, session?.chatState, scrollToBottom])
-
-  // 切换会话时滚动到底部
-  useEffect(() => {
-    requestAnimationFrame(scrollToBottom)
-  }, [activeSessionId, scrollToBottom])
+  const { scrollRef, checkScrollPosition } = useAutoScroll(
+    [session?.messages.length, session?.streamingText, session?.thinkingText, session?.chatState],
+    activeSessionId
+  )
 
   const [showHistory, setShowHistory] = useState(false)
   const [noteGenMsgIdx, setNoteGenMsgIdx] = useState<number | null>(null)
   const [noteGenLoading, setNoteGenLoading] = useState(false)
   const [historyFilter, setHistoryFilter] = useState<'all' | 'current'>('all')
+  const [toastMsg, setToastMsg] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null)
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
   const [similarDialog, setSimilarDialog] = useState<{
     newNote: GeneratedNoteData
     existingNote: Note
@@ -121,7 +132,7 @@ export default function ChatView({
           })
         }
       } else {
-        alert('笔记生成失败，请检查 AI 模型配置是否正确。')
+        setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
       }
     } finally {
       setNoteGenMsgIdx(null)
@@ -135,16 +146,18 @@ export default function ChatView({
   )
 
   const handleMerge = useCallback(async () => {
-    if (!similarDialog) return
+    const dialog = similarDialog
+    if (!dialog) return
     setSimilarDialog((prev) => prev ? { ...prev, merging: true } : null)
-    const result = await mergeNote(similarDialog.existingNote, similarDialog.newNote.title, similarDialog.newNote.content)
+    const result = await mergeNote(dialog.existingNote, dialog.newNote.title, dialog.newNote.content)
     setSimilarDialog((prev) => prev ? { ...prev, merging: false, mergeResult: result || undefined } : null)
   }, [similarDialog, mergeNote])
 
   const handleDialogChoice = useCallback((action: 'update' | 'confirm-merge' | 'create' | 'cancel') => {
-    if (!similarDialog) return
+    const dialog = similarDialog
+    if (!dialog) return
     const { updateNote } = useNoteStore.getState()
-    const { newNote, existingNote, mergeResult } = similarDialog
+    const { newNote, existingNote, mergeResult } = dialog
 
     if (action === 'update') {
       updateNote(existingNote.id, { title: newNote.title, content: newNote.content, chapter: newNote.chapter })
@@ -243,9 +256,10 @@ export default function ChatView({
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        if (confirm('删除此会话？')) deleteSession(s.id)
+                        setDeleteSessionId(s.id)
                       }}
                       className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0"
+                      aria-label="删除会话"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -263,7 +277,7 @@ export default function ChatView({
           )}
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
           {session?.messages.map((message, idx) => {
             const isGeneratingThis = noteGenMsgIdx === idx
             return (
@@ -317,6 +331,7 @@ export default function ChatView({
                 content: session.streamingText,
                 timestamp: Date.now(),
                 type: 'text',
+                thinkingContent: session.thinkingText || undefined,
               }}
               isStreaming
             />
@@ -342,6 +357,7 @@ export default function ChatView({
                 <button
                   onClick={() => session && clearError(session.id)}
                   className="text-red-400 hover:text-red-600"
+                  aria-label="关闭错误提示"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -353,9 +369,22 @@ export default function ChatView({
 
           {(!session || session.messages.length === 0) && (
             <div className="h-full flex items-center justify-center text-gray-400">
-              <div className="text-center">
-                <p className="text-lg font-medium">开始提问吧</p>
-                <p className="text-sm mt-2">可以截图框选或输入文字</p>
+              <div className="text-center max-w-sm">
+                <p className="text-lg font-medium text-gray-600 mb-1">开始提问吧</p>
+                <p className="text-sm mb-4">可以截图框选或输入文字</p>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {['帮我解释这个公式', '这道题怎么做', '总结一下这页内容'].map((prompt) => (
+                    <button
+                      key={prompt}
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('chat:set-input', { detail: prompt }))
+                      }}
+                      className="px-3 py-1.5 text-xs text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -452,6 +481,20 @@ export default function ChatView({
           </div>
         </div>
       )}
+
+      {toastMsg && (
+        <Toast message={toastMsg.message} type={toastMsg.type} onClose={() => setToastMsg(null)} />
+      )}
+
+      <ConfirmDialog
+        open={!!deleteSessionId}
+        title="删除会话"
+        message="确定要删除此会话吗？此操作不可撤销。"
+        confirmLabel="删除"
+        danger
+        onConfirm={() => { if (deleteSessionId) deleteSession(deleteSessionId); setDeleteSessionId(null) }}
+        onCancel={() => setDeleteSessionId(null)}
+      />
     </div>
   )
 }

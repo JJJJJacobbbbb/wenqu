@@ -68,44 +68,30 @@ function removeDuplicateFormulas(text: string): string {
   return result.join('\n')
 }
 
+function renderKatex(text: string, regex: RegExp, displayMode: boolean): string {
+  return text.replace(regex, (_, math) => {
+    try {
+      return katex.renderToString(math.trim(), { displayMode, throwOnError: false })
+    } catch {
+      return math
+    }
+  })
+}
+
 function renderMath(text: string): string {
   let result = text
 
   // $$...$$ — display math
-  result = result.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
-    try {
-      return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })
-    } catch {
-      return math
-    }
-  })
+  result = renderKatex(result, /\$\$([\s\S]+?)\$\$/g, true)
 
   // \[...\] — display math
-  result = result.replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => {
-    try {
-      return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })
-    } catch {
-      return math
-    }
-  })
+  result = renderKatex(result, /\\\[([\s\S]+?)\\\]/g, true)
 
   // \(...\) — inline math
-  result = result.replace(/\\\((.+?)\\\)/g, (_, math) => {
-    try {
-      return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false })
-    } catch {
-      return math
-    }
-  })
+  result = renderKatex(result, /\\\((.+?)\\\)/g, false)
 
   // $...$ — inline math
-  result = result.replace(/\$([^\n$]+?)\$/g, (_, math) => {
-    try {
-      return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false })
-    } catch {
-      return math
-    }
-  })
+  result = renderKatex(result, /\$([^\n$]+?)\$/g, false)
 
   return result
 }
@@ -123,7 +109,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     const render = (html: string) => {
       if (!ref.current) return
       const finalHtml = DOMPurify.sanitize(html, {
-        ADD_ATTR: ['class', 'style', 'aria-hidden'],
+        ADD_ATTR: ['class', 'aria-hidden'],
         ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mtext', 'msqrt', 'mstyle', 'annotation', 'mglyph', 'mspace'],
       })
       // 流式更新时避免不必要的 innerHTML 替换，保留用户文本选区

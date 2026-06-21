@@ -99,25 +99,18 @@ function ThinkingTestButton({ config, model, onResult }: {
     }
   }
 
-  if (testing) {
-    return (
-      <span className="text-[9px] px-1 py-0.5 rounded bg-gray-100 text-gray-400 animate-pulse">
-        测试中...
-      </span>
-    )
-  }
-
   return (
     <button
       onClick={handleTest}
-      className="text-[9px] px-1 py-0.5 rounded transition-colors"
+      disabled={testing}
+      className="text-[9px] px-1.5 py-0.5 rounded transition-colors"
       style={{
-        backgroundColor: model.hasThinking ? '#22c55e20' : '#f3f4f6',
+        backgroundColor: model.hasThinking ? '#22c55e20' : testing ? '#f3f4f6' : '#f3f4f6',
         color: model.hasThinking ? '#16a34a' : '#9ca3af',
       }}
-      title="测试模型是否支持思考模式"
+      title={model.hasThinking ? '已支持思考，点击重新测试' : '点击测试模型是否支持思考模式'}
     >
-      {model.hasThinking ? '思考✓' : '测试思考'}
+      {testing ? '测试中...' : model.hasThinking ? '思考 ✓' : '测试思考'}
     </button>
   )
 }
@@ -469,23 +462,12 @@ export default function ApiSettings() {
                               >
                                 音频
                               </button>
-                              <button
-                                onClick={() => updateModelInConfig(config.id, m.id, { hasThinking: !m.hasThinking })}
-                                className="text-[9px] px-1 py-0.5 rounded transition-colors"
-                                style={{
-                                  backgroundColor: m.hasThinking ? '#22c55e20' : '#f3f4f6',
-                                  color: m.hasThinking ? '#16a34a' : '#9ca3af',
-                                }}
-                                title="支持思考/推理模式"
-                              >
-                                思考
-                              </button>
-                              <ThinkingTestButton
-                                config={config}
-                                model={m}
-                                onResult={(ok) => updateModelInConfig(config.id, m.id, { hasThinking: ok })}
-                              />
                             </div>
+                            <ThinkingTestButton
+                              config={config}
+                              model={m}
+                              onResult={(ok) => updateModelInConfig(config.id, m.id, { hasThinking: ok })}
+                            />
                             <button
                               onClick={() => removeModelFromConfig(config.id, m.id)}
                               className="text-gray-400 hover:text-red-500 p-0.5"

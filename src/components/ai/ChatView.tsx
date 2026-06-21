@@ -281,6 +281,14 @@ export default function ChatView({
             )
           })}
 
+          {(() => {
+            const lastMsg = session?.messages[session.messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.thinkingContent) {
+              return <ThinkingDisplay text={lastMsg.thinkingContent} isStreaming={false} />
+            }
+            return null
+          })()}
+
           {session?.chatState === 'streaming' && (
             <div>
               {session.thinkingText && (

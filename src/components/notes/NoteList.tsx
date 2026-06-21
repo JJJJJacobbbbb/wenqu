@@ -191,80 +191,93 @@ export default function NoteList() {
                   </button>
                 )
               })}
-
-              {/* 科目筛选分隔 */}
-              {subjectsWithNotes.length > 0 && (
-                <>
-                  <span className="w-px h-4 bg-gray-200 flex-shrink-0" />
-                  <button
-                    onClick={() => setFilter('all')}
-                    className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap transition-colors ${
-                      filterType === 'all' && !filterSubjectId ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                    }`}
-                  >
-                    所有科目
-                  </button>
-                  {subjectsWithNotes.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => {
-                        if (filterSubjectId === s.id && filterType === 'subject') {
-                          setFilter('all')
-                        } else {
-                          setFilter('subject', s.id)
-                        }
-                      }}
-                      className={`px-3 py-1.5 text-xs rounded-full whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-                        filterType === 'subject' && filterSubjectId === s.id
-                          ? 'text-white'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                      }`}
-                      style={filterType === 'subject' && filterSubjectId === s.id ? { backgroundColor: s.color } : undefined}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: filterType === 'subject' && filterSubjectId === s.id ? 'white' : s.color }} />
-                      {s.name}
-                    </button>
-                  ))}
-                </>
-              )}
             </div>
           </div>
         )}
       </header>
 
-      {/* 内容区 - 扁平列表 */}
-      <div className="flex-1 overflow-y-auto p-3">
-        {notes.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-gray-400">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <p className="text-base font-medium text-gray-500">暂无笔记</p>
-              <p className="text-sm mt-1">在对话中生成笔记后会自动显示在这里</p>
-            </div>
-          </div>
-        ) : filteredNotes.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-gray-400">
-            <div className="text-center">
-              <p className="text-sm">没有匹配的笔记</p>
+      {/* Body: sidebar + content */}
+      <div className="flex-1 flex min-h-0">
+        {/* 左侧科目栏 */}
+        {subjectsWithNotes.length > 0 && (
+          <aside
+            className="w-40 shrink-0 bg-white border-r border-gray-200 overflow-y-auto py-2 select-none"
+            style={noDragRegion}
+          >
+            <button
+              onClick={() => setFilter('all')}
+              className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${
+                filterType === 'all' && !filterSubjectId
+                  ? 'bg-blue-50 text-blue-600 font-medium'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-base">📚</span>
+              所有科目
+              <span className="ml-auto text-[10px] text-gray-400">{stats.total}</span>
+            </button>
+            <div className="h-px bg-gray-100 my-1" />
+            {subjectsWithNotes.map((s) => (
               <button
-                onClick={() => { setSearchQuery(''); setCategoryFilter(null); setFilter('all') }}
-                className="mt-2 text-sm text-blue-500 hover:text-blue-600"
+                key={s.id}
+                onClick={() => {
+                  if (filterSubjectId === s.id && filterType === 'subject') {
+                    setFilter('all')
+                  } else {
+                    setFilter('subject', s.id)
+                  }
+                }}
+                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${
+                  filterType === 'subject' && filterSubjectId === s.id
+                    ? 'font-medium'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+                style={filterType === 'subject' && filterSubjectId === s.id
+                  ? { backgroundColor: s.color + '15', color: s.color }
+                  : undefined}
               >
-                清除筛选条件
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                <span className="truncate">{s.name}</span>
+                <span className="ml-auto text-[10px] text-gray-400">{stats.bySubject[s.id]}</span>
               </button>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {filteredNotes.map((note) => (
-              <NoteCard key={note.id} note={note} />
             ))}
-          </div>
+          </aside>
         )}
+
+        {/* 内容区 */}
+        <div className="flex-1 overflow-y-auto p-3">
+          {notes.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-gray-400">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                  <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <p className="text-base font-medium text-gray-500">暂无笔记</p>
+                <p className="text-sm mt-1">在对话中生成笔记后会自动显示在这里</p>
+              </div>
+            </div>
+          ) : filteredNotes.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-gray-400">
+              <div className="text-center">
+                <p className="text-sm">没有匹配的笔记</p>
+                <button
+                  onClick={() => { setSearchQuery(''); setCategoryFilter(null); setFilter('all') }}
+                  className="mt-2 text-sm text-blue-500 hover:text-blue-600"
+                >
+                  清除筛选条件
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {filteredNotes.map((note) => (
+                <NoteCard key={note.id} note={note} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -102,6 +102,7 @@ function migrateConfig(raw: Record<string, unknown>): ApiConfig {
       hasVision: Array.isArray(m.modalities) ? (m.modalities as string[]).includes('vision') : Boolean(m.hasVision),
       maxContextTokens: Number(m.maxContextTokens) || DEFAULT_MAX_TOKENS,
       audioCapable: Boolean(m.audioCapable),
+      hasThinking: Boolean(m.hasThinking),
     }))
     return {
       id: String(raw.id || generateId('api')),

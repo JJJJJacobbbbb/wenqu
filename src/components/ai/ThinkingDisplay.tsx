@@ -12,14 +12,6 @@ export default function ThinkingDisplay({ text, isStreaming, statusText }: Think
   const containerRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(true)
 
-  // 思考结束时自动收起
-  useEffect(() => {
-    if (!isStreaming && text) {
-      const t = setTimeout(() => setExpanded(false), 800)
-      return () => clearTimeout(t)
-    }
-  }, [isStreaming, text])
-
   // 流式+展开时自动滚动到底部
   useEffect(() => {
     if (isStreaming && expanded && containerRef.current) {
@@ -47,7 +39,7 @@ export default function ThinkingDisplay({ text, isStreaming, statusText }: Think
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        {isStreaming ? '思考中...' : '思考过程'}
+        {isStreaming ? '思考中...' : '已思考'}
       </button>
 
       {expanded && (

@@ -267,12 +267,6 @@ export default function FloatingChat() {
       ) : (
         <>
           <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {session?.messages.map((message) => (
-              <div key={message.id}>
-                <ChatMessage message={message} />
-              </div>
-            ))}
-
             {(() => {
               const lastMsg = session?.messages[session.messages.length - 1]
               if (lastMsg?.role === 'assistant' && lastMsg.thinkingContent) {
@@ -280,6 +274,12 @@ export default function FloatingChat() {
               }
               return null
             })()}
+
+            {session?.messages.map((message) => (
+              <div key={message.id}>
+                <ChatMessage message={message} />
+              </div>
+            ))}
 
             {session?.chatState === 'streaming' && (
               <div>

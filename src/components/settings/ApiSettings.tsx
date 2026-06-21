@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { logger } from '../../lib/logger'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useSettingsStore, type ModelConfig, type ProviderCategory } from '../../stores/settingsStore'
 import { PROVIDER_PRESETS, CATEGORY_LABELS, CATEGORY_COLORS, type ProviderPreset } from '../../config/providerPresets'
@@ -41,12 +40,6 @@ function DefaultModelSelect({ models, activeModelId, onSelect }: {
   )
 }
 
-// 1x1 白色 PNG (用于视觉能力测试)
-const TEST_IMAGE = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='
-
-// 已知音频模型关键词
-const AUDIO_KEYWORDS = ['whisper', 'audio', 'speech', 'tts', 'asr']
-
 async function testThinking(apiUrl: string, apiKey: string, modelId: string): Promise<boolean> {
   const res = await fetch(apiUrl, {
     method: 'POST',
@@ -78,94 +71,6 @@ async function testThinking(apiUrl: string, apiKey: string, modelId: string): Pr
   }
   reader.cancel()
   return found
-}
-
-async function testVision(apiUrl: string, apiKey: string, modelId: string): Promise<boolean> {
-  const res = await fetch(apiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: modelId,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: '描述这张图片' },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${TEST_IMAGE}` } },
-      ] }],
-      max_tokens: 50,
-    }),
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) {
-    // 400/400 通常表示模型不接受图片
-    if (res.status === 400 || res.status === 415) return false
-    throw new Error(`HTTP ${res.status}`)
-  }
-  const data = await res.json().catch(() => null)
-  // 有正常回复 = 支持图片
-  return !!(data?.choices?.[0]?.message?.content)
-}
-
-function testAudioByName(modelId: string): boolean {
-  const lower = modelId.toLowerCase()
-  return AUDIO_KEYWORDS.some((kw) => lower.includes(kw))
-}
-
-function ModelCapabilityTester({ config, model, onResult }: {
-  config: { apiUrl: string; apiKey: string }
-  model: { modelId: string; hasThinking?: boolean; hasVision?: boolean; audioCapable?: boolean }
-  onResult: (result: { hasThinking: boolean; hasVision: boolean; audioCapable: boolean }, msg: string) => void
-}) {
-  const [testing, setTesting] = useState(false)
-
-  const handleTest = async () => {
-    if (testing) return
-    if (!config.apiUrl || !config.apiKey) {
-      onResult({ hasThinking: model.hasThinking ?? false, hasVision: model.hasVision ?? false, audioCapable: model.audioCapable ?? false }, '请先填写 API 地址和 Key')
-      return
-    }
-    setTesting(true)
-    try {
-      // 并行测试思考和视觉
-      const [thinking, vision] = await Promise.allSettled([
-        testThinking(config.apiUrl, config.apiKey, model.modelId),
-        testVision(config.apiUrl, config.apiKey, model.modelId),
-      ])
-      const hasThinking = thinking.status === 'fulfilled' ? thinking.value : false
-      const hasVision = vision.status === 'fulfilled' ? vision.value : false
-      const audioCapable = testAudioByName(model.modelId)
-
-      const parts: string[] = []
-      if (hasThinking) parts.push('思考')
-      if (hasVision) parts.push('视觉')
-      if (audioCapable) parts.push('音频')
-      const msg = parts.length > 0
-        ? `检测到能力: ${parts.join('、')}`
-        : '未检测到特殊能力（普通文本模型）'
-
-      onResult({ hasThinking, hasVision, audioCapable }, msg)
-    } catch (err) {
-      logger.error('能力测试失败', err)
-      const msg = err instanceof Error ? `测试失败: ${err.message}` : '测试失败'
-      onResult({ hasThinking: false, hasVision: false, audioCapable: false }, msg)
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  return (
-    <button
-      onClick={handleTest}
-      disabled={testing}
-      className="text-[10px] px-2 py-0.5 rounded border transition-colors"
-      style={{
-        backgroundColor: '#f9fafb',
-        color: '#6b7280',
-        border: '1px solid #e5e7eb',
-      }}
-      title="自动测试模型的思考、视觉、音频能力"
-    >
-      {testing ? '测试中...' : '测试能力'}
-    </button>
-  )
 }
 
 export default function ApiSettings() {
@@ -508,19 +413,40 @@ export default function ApiSettings() {
                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                               </button>
                             </div>
-                            {/* 能力标签 + 测试按钮 */}
-                            <div className="flex items-center gap-1.5 mt-1 ml-1 flex-wrap">
-                              {m.hasThinking && <span className="text-[9px] px-1 py-0.5 rounded bg-green-50 text-green-600 border border-green-200">思考</span>}
-                              {m.hasVision && <span className="text-[9px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-200">视觉</span>}
-                              {m.audioCapable && <span className="text-[9px] px-1 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200">音频</span>}
-                              <ModelCapabilityTester
-                                config={config}
-                                model={m}
-                                onResult={(result, msg) => {
-                                  updateModelInConfig(config.id, m.id, result)
-                                  setModelTestMsg({ text: msg, type: (result.hasThinking || result.hasVision || result.audioCapable) ? 'success' : 'info' })
+                            {/* 能力标签 */}
+                            <div className="flex items-center gap-1 mt-1 ml-1 flex-wrap">
+                              <button
+                                onClick={() => updateModelInConfig(config.id, m.id, { hasVision: !m.hasVision })}
+                                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${m.hasVision ? 'bg-purple-50 text-purple-600 border-purple-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                              >
+                                视觉
+                              </button>
+                              <button
+                                onClick={() => updateModelInConfig(config.id, m.id, { audioCapable: !m.audioCapable })}
+                                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${m.audioCapable ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                              >
+                                音频
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!config.apiUrl || !config.apiKey) {
+                                    setModelTestMsg({ text: '请先填写 API 地址和 Key', type: 'error' })
+                                    return
+                                  }
+                                  try {
+                                    const ok = await testThinking(config.apiUrl, config.apiKey, m.modelId)
+                                    updateModelInConfig(config.id, m.id, { hasThinking: ok })
+                                    setModelTestMsg({ text: ok ? '该模型支持思考模式' : '该模型不支持思考模式', type: ok ? 'success' : 'info' })
+                                  } catch (err) {
+                                    const msg = err instanceof Error ? err.message : '未知错误'
+                                    setModelTestMsg({ text: `测试失败: ${msg}`, type: 'error' })
+                                  }
                                 }}
-                              />
+                                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${m.hasThinking ? 'bg-green-50 text-green-600 border-green-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                                title="点击测试模型是否支持思考模式"
+                              >
+                                {m.hasThinking ? '思考 ✓' : '思考'}
+                              </button>
                             </div>
                           </div>
                         ))}

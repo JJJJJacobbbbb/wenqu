@@ -267,12 +267,11 @@ export default function FloatingChat() {
       ) : (
         <>
           <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {session?.thinkingText && (
-              <ThinkingDisplay text={session.thinkingText} isStreaming={false} />
-            )}
-
             {session?.messages.map((message) => (
               <div key={message.id}>
+                {message.role === 'assistant' && message.thinkingContent && (
+                  <ThinkingDisplay text={message.thinkingContent} isStreaming={false} />
+                )}
                 <ChatMessage message={message} />
               </div>
             ))}

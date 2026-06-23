@@ -236,14 +236,13 @@ export default function ChatView({
         </div>
       ) : (
         <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
-          {session?.thinkingText && (
-            <ThinkingDisplay text={session.thinkingText} isStreaming={false} />
-          )}
-
           {session?.messages.map((message, idx) => {
             const isGeneratingThis = noteGenMsgIdx === idx
             return (
               <div key={message.id}>
+                {message.role === 'assistant' && message.thinkingContent && (
+                  <ThinkingDisplay text={message.thinkingContent} isStreaming={false} />
+                )}
                 <ChatMessage message={message} />
                 {/* AI 回复完成后显示生成笔记按钮 */}
                 {hasAiModel && message.role === 'assistant' &&

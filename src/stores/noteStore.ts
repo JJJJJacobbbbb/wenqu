@@ -15,6 +15,8 @@ export const NOTE_CATEGORY_LABELS: Record<NoteCategory, string> = {
 
 const ALL_CATEGORIES: NoteCategory[] = ['knowledge', 'technique', 'other']
 
+const NOTE_MAX_CHARS = 8000 // 限制输入字符数，避免上下文过长
+
 async function callAI(
   config: { apiUrl: string; apiKey: string },
   model: { modelId: string },
@@ -40,13 +42,35 @@ async function callAI(
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ],
-        stream: false,
+        stream: true,
+        max_tokens: 2048,
       }),
       signal: controller.signal,
     })
     if (!response.ok) return null
-    const result = await response.json()
-    return result.choices?.[0]?.message?.content || null
+    if (!response.body) return null
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value, { stream: true })
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6)
+        if (data === '[DONE]') break
+        try {
+          const parsed = JSON.parse(data)
+          const content = parsed.choices?.[0]?.delta?.content
+          if (content) fullText += content
+        } catch {}
+      }
+    }
+
+    return fullText || null
   } catch {
     return null
   } finally {
@@ -179,15 +203,24 @@ export const useNoteStore = create<NoteState>((set, get) => {
     const { config, model } = modelInfo
 
     try {
-      // 1. 生成笔记
+      // 1. 截断过长输入，避免上下文超限
+      const truncatedUser = userContent.length > NOTE_MAX_CHARS
+        ? userContent.slice(0, NOTE_MAX_CHARS) + '\n...[内容过长已截断]'
+        : userContent
+      const truncatedAssistant = assistantContent.length > NOTE_MAX_CHARS
+        ? assistantContent.slice(0, NOTE_MAX_CHARS) + '\n...[内容过长已截断]'
+        : assistantContent
+
+      // 2. 生成笔记
       const prompt = NOTE_PROMPTS[type]
-      let userMsg = `学生的问题：\n${userContent}\n\nAI的回答：\n${assistantContent}`
+      let userMsg = `学生的问题：\n${truncatedUser}\n\nAI的回答：\n${truncatedAssistant}`
       if (extraInstructions) {
         userMsg += `\n\n用户补充要求：${extraInstructions}`
       }
       const text = await callAI(config, model, prompt, userMsg)
       if (!text) return null
 
+      // 3. 解析笔记结构
       const category: NoteCategory = type === 'knowledge' ? 'knowledge' : type === 'technique' ? 'technique' : 'other'
       let title = ''
       let content = ''

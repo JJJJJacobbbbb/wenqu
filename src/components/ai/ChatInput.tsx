@@ -46,6 +46,8 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const recorderRef = useRef<ReturnType<typeof recordAndTranscribe> | null>(null)
+  const isRecordingRef = useRef(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
   const [modelOpen, setModelOpen] = useState(false)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
@@ -60,6 +62,9 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
     captureTimers.current.forEach(clearTimeout)
     if (audioPreviewRef.current?.url) URL.revokeObjectURL(audioPreviewRef.current.url)
   }, [])
+
+  // 保持 ref 与 state 同步，避免 toggleRecording 闭包过期
+  useEffect(() => { isRecordingRef.current = isRecording }, [isRecording])
 
   // 监听外部设置输入内容的自定义事件（用于 starter prompts）
   useEffect(() => {
@@ -126,11 +131,12 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
   )
 
   const toggleRecording = useCallback(async () => {
-    if (isRecording && recorderRef.current) {
+    if (isRecordingRef.current && recorderRef.current) {
       recorderRef.current.stop()
       return
     }
     if (!isVoiceAvailable()) return
+    setVoiceError(null)
     try {
       const recorder = recordAndTranscribe((status) => {
         if (status === 'processing') {
@@ -148,16 +154,22 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
       audioPreviewRef.current = preview
       setAudioPreview(preview)
     } catch (err) {
+      const msg = err instanceof Error ? err.message : '语音识别失败'
+      if (msg.includes('麦克风') || msg.includes('Permission') || msg.includes('NotAllowed')) {
+        setVoiceError('请允许麦克风权限后重试')
+      } else {
+        setVoiceError(msg)
+      }
       logger.error('语音识别错误', err)
     } finally {
       setIsRecording(false)
       setIsTranscribing(false)
       recorderRef.current = null
     }
-  }, [isRecording])
+  }, [])
 
   const canSend = (input.trim() || pendingScreenshots.length > 0) && !isGenerating
-  const voiceDisabled = !isVoiceAvailable()
+  const voiceDisabled = useMemo(() => !isVoiceAvailable(), [apiConfigs])
 
   return (
     <div className="flex flex-col gap-2">
@@ -338,6 +350,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
 
           {isRecording && <span className="text-xs text-red-500 animate-pulse ml-1">录音中...</span>}
           {isTranscribing && !isRecording && <span className="text-xs text-yellow-600 ml-1">识别中...</span>}
+          {voiceError && <span className="text-xs text-red-500 ml-1">{voiceError}</span>}
         </div>
 
         <div className="flex items-center gap-1.5">

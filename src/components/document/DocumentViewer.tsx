@@ -13,10 +13,7 @@ import ImageViewer from './ImageViewer'
 import ChatView from '../ai/ChatView'
 import WinControls from '../shared/WinControls'
 
-const PdfViewer = lazy(() => import('./PdfViewer').then((m) => {
-  import('../../pdfSetup')
-  return m
-}))
+const PdfViewer = lazy(() => import('./PdfViewer'))
 
 export default function DocumentViewer() {
   const { tabs, activeTabId, closeTab, setActiveTab, getActiveDocument, openFile, selectionMode } = useDocumentStore()

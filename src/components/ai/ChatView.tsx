@@ -1,9 +1,9 @@
-import { useEffect, useState, ReactNode, useCallback, useMemo } from 'react'
+import { useEffect, useState, ReactNode, useCallback, useMemo, useRef } from 'react'
 import { useAiStore } from '../../stores/aiStore'
 import { useSubjectStore } from '../../stores/subjectStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
-import { useNoteStore, NOTE_CATEGORY_LABELS } from '../../stores/noteStore'
+import { useNoteStore, NOTE_CATEGORY_LABELS, type NoteCategory, type GeneratedNoteData } from '../../stores/noteStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import ChatMessage from './ChatMessage'
 import ChatInput from './ChatInput'
@@ -12,6 +12,12 @@ import SessionControls from './SessionControls'
 import ThinkingDisplay from './ThinkingDisplay'
 import Toast from '../shared/Toast'
 import ConfirmDialog from '../shared/ConfirmDialog'
+
+const NOTE_TYPES: { type: NoteCategory; label: string }[] = [
+  { type: 'knowledge', label: '知识重点' },
+  { type: 'technique', label: '解题技巧' },
+  { type: 'other', label: '其他' },
+]
 
 interface ChatViewProps {
   headerExtra?: ReactNode
@@ -45,8 +51,8 @@ export default function ChatView({
     currentSubjectId: s.currentSubjectId,
     subjects: s.subjects,
   })))
-  const { generateNote, addNote } = useNoteStore(useShallow((s) => ({
-    generateNote: s.generateNote,
+  const { generateNoteStream, addNote } = useNoteStore(useShallow((s) => ({
+    generateNoteStream: s.generateNoteStream,
     addNote: s.addNote,
   })))
   const { getActiveModel, apiConfigs } = useSettingsStore(useShallow((s) => ({
@@ -60,18 +66,35 @@ export default function ChatView({
   )
 
   const [showHistory, setShowHistory] = useState(false)
-  const [noteGenMsgIdx, setNoteGenMsgIdx] = useState<number | null>(null)
   const [historyFilter, setHistoryFilter] = useState<'all' | 'current'>('all')
   const [toastMsg, setToastMsg] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null)
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
-  const [noteInputDialog, setNoteInputDialog] = useState<{
+
+  // 统一笔记弹窗：input → generating → preview
+  const [noteDialog, setNoteDialog] = useState<{
     msgIdx: number
-    type: 'knowledge' | 'technique' | 'other'
+    type: NoteCategory
+    phase: 'input' | 'generating' | 'preview'
     extraInstructions: string
+    result: GeneratedNoteData | null
   } | null>(null)
+  const [noteTitle, setNoteTitle] = useState('')
+  const [noteChapter, setNoteChapter] = useState('')
+  const [noteContent, setNoteContent] = useState('')
+  const noteSavingRef = useRef(false)
+
+  // Escape 关闭笔记弹窗
+  useEffect(() => {
+    if (!noteDialog) return
+    noteSavingRef.current = false
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNoteDialog(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [noteDialog])
 
   useEffect(() => {
-    // 只在完全没有会话时才创建新会话
     const all = useAiStore.getState().sessions
     if (Object.keys(all).length === 0) {
       createSession()
@@ -96,9 +119,11 @@ export default function ChatView({
     return subject?.color || '#9ca3af'
   }, [subjects])
 
-  const handleGenerateNote = useCallback(async (msgIdx: number, type: 'knowledge' | 'technique' | 'other', extraInstructions?: string) => {
-    if (!session) return
-    setNoteGenMsgIdx(msgIdx)
+  const handleNoteGenerate = useCallback(async () => {
+    if (!session || !noteDialog || noteDialog.phase !== 'input') return
+    const { msgIdx, type, extraInstructions } = noteDialog
+    setNoteContent('')
+    setNoteDialog({ ...noteDialog, phase: 'generating' })
     try {
       let userMsg = ''
       for (let i = msgIdx - 1; i >= 0; i--) {
@@ -108,25 +133,35 @@ export default function ChatView({
         }
       }
       const aiMsg = session.messages[msgIdx].content
-      const result = await generateNote(userMsg, aiMsg, currentSubjectId, type, extraInstructions)
+      const result = await generateNoteStream(userMsg, aiMsg, currentSubjectId, type, (text) => setNoteContent(text), extraInstructions || undefined)
       if (result) {
-        addNote({
-          title: result.title,
-          content: result.content,
-          subjectId: currentSubjectId,
-          category: result.category,
-          chapter: result.chapter,
-        })
-        setToastMsg({ message: '笔记已保存', type: 'success' })
+        setNoteTitle(result.title)
+        setNoteChapter(result.chapter)
+        setNoteContent(result.content)
+        setNoteDialog({ ...noteDialog, phase: 'preview', result })
       } else {
         setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
+        setNoteDialog(null)
       }
     } catch {
       setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
-    } finally {
-      setNoteGenMsgIdx(null)
+      setNoteDialog(null)
     }
-  }, [session, currentSubjectId, generateNote, addNote])
+  }, [session, noteDialog, currentSubjectId, generateNoteStream])
+
+  const handleNoteSave = useCallback(() => {
+    if (!noteDialog?.result || noteSavingRef.current) return
+    noteSavingRef.current = true
+    addNote({
+      title: noteTitle || noteDialog.result.title,
+      content: noteContent || noteDialog.result.content,
+      subjectId: currentSubjectId,
+      category: noteDialog.result.category,
+      chapter: noteChapter || noteDialog.result.chapter,
+    })
+    setToastMsg({ message: '笔记已保存', type: 'success' })
+    setNoteDialog(null)
+  }, [noteDialog, noteTitle, noteChapter, noteContent, currentSubjectId, addNote])
 
   const hasAiModel = useMemo(() =>
     getActiveModel() !== null,
@@ -155,7 +190,6 @@ export default function ChatView({
             </button>
           </div>
 
-          {/* 筛选按钮 */}
           <div className="flex items-center gap-1.5 mb-3">
             <button
               onClick={() => setHistoryFilter('all')}
@@ -237,41 +271,29 @@ export default function ChatView({
       ) : (
         <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
           {session?.messages.map((message, idx) => {
-            const isGeneratingThis = noteGenMsgIdx === idx
+            const isGeneratingThis = noteDialog?.msgIdx === idx && noteDialog.phase === 'generating'
             return (
               <div key={message.id}>
                 {message.role === 'assistant' && message.thinkingContent && (
                   <ThinkingDisplay text={message.thinkingContent} isStreaming={false} />
                 )}
                 <ChatMessage message={message} />
-                {/* AI 回复完成后显示生成笔记按钮 */}
                 {hasAiModel && message.role === 'assistant' &&
                   session.chatState === 'idle' &&
                   message.content && message.content !== '(无响应内容)' && (
                   <div className="flex justify-start mt-1">
                     <div className="ml-0 max-w-[85%]">
                       <div className="flex gap-1">
-                        <button
-                          onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'knowledge', extraInstructions: '' })}
-                          disabled={isGeneratingThis}
-                          className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          + 知识重点
-                        </button>
-                        <button
-                          onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'technique', extraInstructions: '' })}
-                          disabled={isGeneratingThis}
-                          className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          + 解题技巧
-                        </button>
-                        <button
-                          onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'other', extraInstructions: '' })}
-                          disabled={isGeneratingThis}
-                          className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          + 其他
-                        </button>
+                        {NOTE_TYPES.map(({ type, label }) => (
+                          <button
+                            key={type}
+                            onClick={() => setNoteDialog({ msgIdx: idx, type, phase: 'input', extraInstructions: '', result: null })}
+                            disabled={isGeneratingThis}
+                            className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            + {label}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -367,38 +389,97 @@ export default function ChatView({
         <ChatInput screenshotMode={screenshotMode} />
       </div>
 
-      {/* 笔记生成输入弹窗 */}
-      {noteInputDialog && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setNoteInputDialog(null)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-gray-800 mb-1">
-              生成{NOTE_CATEGORY_LABELS[noteInputDialog.type]}笔记
-            </h3>
-            <p className="text-xs text-gray-400 mb-3">可补充说明，让笔记更贴合你的需求</p>
-            <textarea
-              value={noteInputDialog.extraInstructions}
-              onChange={(e) => setNoteInputDialog({ ...noteInputDialog, extraInstructions: e.target.value })}
-              placeholder="例如：重点写公式推导过程、用表格对比..."
-              className="w-full h-24 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:border-blue-400 mb-4"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  const { msgIdx, type, extraInstructions } = noteInputDialog
-                  setNoteInputDialog(null)
-                  handleGenerateNote(msgIdx, type, extraInstructions || undefined)
-                }}
-                className="flex-1 py-2 text-sm text-white bg-purple-500 hover:bg-purple-600 rounded transition-colors"
-              >
-                生成笔记
-              </button>
-              <button
-                onClick={() => setNoteInputDialog(null)}
-                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-              >
-                取消
-              </button>
+      {/* 笔记弹窗：统一 input / generating / preview 三个阶段 */}
+      {noteDialog && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => noteDialog.phase !== 'generating' && setNoteDialog(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* 头部 */}
+            <div className="p-4 border-b border-gray-100 shrink-0">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold text-gray-800">
+                  {noteDialog.phase === 'preview' ? '笔记预览' : `生成${NOTE_CATEGORY_LABELS[noteDialog.type]}笔记`}
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-600">
+                  {NOTE_CATEGORY_LABELS[noteDialog.type]}
+                </span>
+              </div>
+              {noteDialog.phase === 'preview' ? (
+                <div className="space-y-2">
+                  <input
+                    value={noteTitle}
+                    onChange={(e) => setNoteTitle(e.target.value)}
+                    className="w-full text-sm font-medium text-gray-800 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                    placeholder="笔记标题"
+                  />
+                  <input
+                    value={noteChapter}
+                    onChange={(e) => setNoteChapter(e.target.value)}
+                    className="w-full text-xs text-gray-600 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                    placeholder="章节（可选）"
+                  />
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-400 mb-3">可补充说明，让笔记更贴合你的需求</p>
+                  <textarea
+                    value={noteDialog.extraInstructions}
+                    onChange={(e) => setNoteDialog({ ...noteDialog, extraInstructions: e.target.value })}
+                    placeholder="例如：重点写公式推导过程、用表格对比..."
+                    className="w-full h-24 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:border-blue-400"
+                    autoFocus={noteDialog.phase === 'input'}
+                    disabled={noteDialog.phase === 'generating'}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* 内容区 */}
+            {(noteDialog.phase === 'generating' || noteDialog.phase === 'preview') && (
+              <div className="flex-1 min-h-0 p-4">
+                <textarea
+                  value={noteContent}
+                  onChange={(e) => setNoteContent(e.target.value)}
+                  readOnly={noteDialog.phase === 'generating'}
+                  className="w-full h-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:border-blue-400"
+                />
+              </div>
+            )}
+
+            {/* 底部按钮 */}
+            <div className="p-4 border-t border-gray-100 flex gap-2 shrink-0">
+              {noteDialog.phase === 'preview' ? (
+                <>
+                  <button
+                    onClick={handleNoteSave}
+                    className="flex-1 py-2 text-sm text-white bg-purple-500 hover:bg-purple-600 rounded transition-colors"
+                  >
+                    保存笔记
+                  </button>
+                  <button
+                    onClick={() => setNoteDialog(null)}
+                    className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    取消
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleNoteGenerate}
+                    disabled={noteDialog.phase === 'generating'}
+                    className="flex-1 py-2 text-sm text-white bg-purple-500 hover:bg-purple-600 rounded transition-colors disabled:opacity-50"
+                  >
+                    {noteDialog.phase === 'generating' ? '生成中...' : '生成笔记'}
+                  </button>
+                  <button
+                    onClick={() => setNoteDialog(null)}
+                    disabled={noteDialog.phase === 'generating'}
+                    className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

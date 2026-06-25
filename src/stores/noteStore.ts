@@ -112,6 +112,7 @@ interface NoteState {
   getFilteredNotes: () => Note[]
 
   generateNote: (userContent: string, assistantContent: string, subjectId: string | null, type: GenerateNoteType, extraInstructions?: string) => Promise<GeneratedNoteData | null>
+  generateNoteStream: (userContent: string, assistantContent: string, subjectId: string | null, type: GenerateNoteType, onChunk: (text: string) => void, extraInstructions?: string) => Promise<GeneratedNoteData | null>
 
   loadFromStorage: () => void
   saveToStorage: () => void
@@ -240,6 +241,105 @@ export const useNoteStore = create<NoteState>((set, get) => {
       return { title, content, category, chapter }
     } catch (e) {
       logger.error('生成笔记失败', e)
+      return null
+    }
+  },
+
+  generateNoteStream: async (userContent, assistantContent, _subjectId, type, onChunk, extraInstructions) => {
+    const settingsStore = useSettingsStore.getState()
+    const modelInfo = settingsStore.getActiveModel()
+    if (!modelInfo) return null
+
+    const { config, model } = modelInfo
+
+    try {
+      const truncatedUser = userContent.length > NOTE_MAX_CHARS
+        ? userContent.slice(0, NOTE_MAX_CHARS) + '\n...[内容过长已截断]'
+        : userContent
+      const truncatedAssistant = assistantContent.length > NOTE_MAX_CHARS
+        ? assistantContent.slice(0, NOTE_MAX_CHARS) + '\n...[内容过长已截断]'
+        : assistantContent
+
+      const prompt = NOTE_PROMPTS[type]
+      let userMsg = `学生的问题：\n${truncatedUser}\n\nAI的回答：\n${truncatedAssistant}`
+      if (extraInstructions) {
+        userMsg += `\n\n用户补充要求：${extraInstructions}`
+      }
+
+      let apiUrl = config.apiUrl.trim()
+      if (!/\/chat\/completions\/?$/.test(apiUrl)) {
+        apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions'
+      }
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 60000)
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model.modelId,
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: userMsg },
+          ],
+          stream: true,
+          max_tokens: 2048,
+        }),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeout)
+
+      if (!response.ok) return null
+      if (!response.body) return null
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let fullText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') break
+          try {
+            const parsed = JSON.parse(data)
+            const content = parsed.choices?.[0]?.delta?.content
+            if (content) {
+              fullText += content
+              onChunk(fullText)
+            }
+          } catch {}
+        }
+      }
+
+      if (!fullText) return null
+
+      const category: NoteCategory = type === 'knowledge' ? 'knowledge' : type === 'technique' ? 'technique' : 'other'
+      let title = ''
+      let content = ''
+      let chapter = '通用'
+
+      const chapterMatch = fullText.match(/【章节】(.+)/)
+      const titleMatch = fullText.match(/【标题】(.+)/)
+      const contentMatch = fullText.match(/【内容】([\s\S]*)/)
+
+      if (chapterMatch) chapter = chapterMatch[1].trim() || '通用'
+      if (titleMatch) title = titleMatch[1].trim()
+      if (contentMatch) content = contentMatch[1].trim()
+
+      if (!title) title = userContent.slice(0, 20)
+      if (!content) content = fullText
+
+      return { title, content, category, chapter }
+    } catch (e) {
+      logger.error('流式生成笔记失败', e)
       return null
     }
   },

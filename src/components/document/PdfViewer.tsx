@@ -27,28 +27,15 @@ export default function PdfViewer({ content }: PdfViewerProps) {
   const renderingRef = useRef<Set<number>>(new Set())
   const pagesRef = useRef<PageInfo[]>([])
 
-  const measure = useCallback(() => {
-    if (containerRef.current) {
-      setBaseWidth(containerRef.current.clientWidth)
-    }
-  }, [])
-
   useEffect(() => {
-    measure()
-    const onResize = () => requestAnimationFrame(measure)
-    window.addEventListener('resize', onResize)
-
-    let ro: ResizeObserver | null = null
-    if (containerRef.current) {
-      ro = new ResizeObserver(onResize)
-      ro.observe(containerRef.current)
-    }
-
-    return () => {
-      window.removeEventListener('resize', onResize)
-      ro?.disconnect()
-    }
-  }, [measure])
+    const el = containerRef.current
+    if (!el) return
+    const update = () => setBaseWidth(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // 加载 PDF 并获取页信息（不渲染）
   useEffect(() => {
@@ -212,7 +199,7 @@ export default function PdfViewer({ content }: PdfViewerProps) {
 
     return () => observer.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, pages.length, renderPage])
+  }, [loading, pages.length, renderPage, baseWidth])
 
   if (loading) {
     return (
@@ -233,7 +220,7 @@ export default function PdfViewer({ content }: PdfViewerProps) {
   const displayW = (baseWidth || 600) * zoom
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden min-w-0">
       {/* 工具栏 */}
       <div className="h-10 bg-gray-50 border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
         <span className="text-sm text-gray-500">共 {totalPages} 页</span>

@@ -35,8 +35,9 @@ export default function PdfViewer({ content }: PdfViewerProps) {
 
   useEffect(() => {
     measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    const onResize = () => requestAnimationFrame(measure)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [measure])
 
   // 加载 PDF 并获取页信息（不渲染）

@@ -61,7 +61,6 @@ export default function ChatView({
 
   const [showHistory, setShowHistory] = useState(false)
   const [noteGenMsgIdx, setNoteGenMsgIdx] = useState<number | null>(null)
-  const [noteGenLoading, setNoteGenLoading] = useState(false)
   const [historyFilter, setHistoryFilter] = useState<'all' | 'current'>('all')
   const [toastMsg, setToastMsg] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null)
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
@@ -100,7 +99,6 @@ export default function ChatView({
   const handleGenerateNote = useCallback(async (msgIdx: number, type: 'knowledge' | 'technique' | 'other', extraInstructions?: string) => {
     if (!session) return
     setNoteGenMsgIdx(msgIdx)
-    setNoteGenLoading(true)
     try {
       let userMsg = ''
       for (let i = msgIdx - 1; i >= 0; i--) {
@@ -119,12 +117,12 @@ export default function ChatView({
           category: result.category,
           chapter: result.chapter,
         })
+        setToastMsg({ message: '笔记已保存', type: 'success' })
       } else {
         setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
       }
     } finally {
       setNoteGenMsgIdx(null)
-      setNoteGenLoading(false)
     }
   }, [session, currentSubjectId, generateNote, addNote])
 
@@ -250,33 +248,29 @@ export default function ChatView({
                   message.content && message.content !== '(无响应内容)' && (
                   <div className="flex justify-start mt-1">
                     <div className="ml-0 max-w-[85%]">
-                      {isGeneratingThis ? (
-                        <span className="text-[10px] text-purple-500 animate-pulse">生成笔记中...</span>
-                      ) : (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'knowledge', extraInstructions: '' })}
-                            disabled={noteGenLoading}
-                            className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors"
-                          >
-                            + 知识重点
-                          </button>
-                          <button
-                            onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'technique', extraInstructions: '' })}
-                            disabled={noteGenLoading}
-                            className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors"
-                          >
-                            + 解题技巧
-                          </button>
-                          <button
-                            onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'other', extraInstructions: '' })}
-                            disabled={noteGenLoading}
-                            className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors"
-                          >
-                            + 其他
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'knowledge', extraInstructions: '' })}
+                          disabled={isGeneratingThis}
+                          className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isGeneratingThis ? '生成中...' : '+ 知识重点'}
+                        </button>
+                        <button
+                          onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'technique', extraInstructions: '' })}
+                          disabled={isGeneratingThis}
+                          className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          + 解题技巧
+                        </button>
+                        <button
+                          onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'other', extraInstructions: '' })}
+                          disabled={isGeneratingThis}
+                          className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          + 其他
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

@@ -30,7 +30,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: 'DeepSeek',
     apiUrl: 'https://api.deepseek.com/chat/completions',
     models: [
-      { name: 'DeepSeek Chat', modelId: 'deepseek-chat', hasVision: true, maxContextTokens: 64000 },
+      { name: 'DeepSeek Chat', modelId: 'deepseek-chat', hasVision: false, maxContextTokens: 64000 },
       { name: 'DeepSeek R1', modelId: 'deepseek-reasoner', hasVision: true, maxContextTokens: 64000, hasThinking: true },
     ],
     category: 'cn',

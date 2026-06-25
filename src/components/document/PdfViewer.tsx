@@ -16,7 +16,7 @@ interface PageInfo {
 }
 
 export default function PdfViewer({ content }: PdfViewerProps) {
-  const measureRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [baseWidth, setBaseWidth] = useState(0)
   const [pages, setPages] = useState<PageInfo[]>([])
   const [totalPages, setTotalPages] = useState(0)
@@ -25,18 +25,17 @@ export default function PdfViewer({ content }: PdfViewerProps) {
   const [loading, setLoading] = useState(true)
   const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
   const renderingRef = useRef<Set<number>>(new Set())
-  const containerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageInfo[]>([])
 
   const measure = useCallback(() => {
-    if (measureRef.current) {
-      setBaseWidth(measureRef.current.clientWidth)
+    if (containerRef.current) {
+      setBaseWidth(containerRef.current.clientWidth)
     }
   }, [])
 
   useEffect(() => {
     measure()
-    const el = measureRef.current
+    const el = containerRef.current
     if (!el) return
     const ro = new ResizeObserver(() => measure())
     ro.observe(el)
@@ -234,8 +233,7 @@ export default function PdfViewer({ content }: PdfViewerProps) {
       </div>
       {/* 内容区 */}
       <div ref={containerRef} className="flex-1 overflow-auto bg-gray-100 p-4">
-        <div ref={measureRef} className="w-full min-w-[300px]" />
-        <div className="flex flex-col items-start gap-4 mt-4">
+        <div className="flex flex-col items-start gap-4">
           {pages.map((p, i) => (
             <div
               key={i}

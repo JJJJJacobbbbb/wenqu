@@ -96,12 +96,12 @@ export default function DocumentViewer() {
   // 右键取消框选
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    if (isSelecting) {
+    if (isSelectingRef.current) {
       setIsSelecting(false)
       setSelStart(null)
       setSelEnd(null)
     }
-  }, [isSelecting])
+  }, [])
 
   // 全局 mousemove/mouseup 监听（有 activeDocument 时始终监听，以检测拖动）
   useEffect(() => {

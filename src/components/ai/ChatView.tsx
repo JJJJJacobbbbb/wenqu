@@ -121,6 +121,8 @@ export default function ChatView({
       } else {
         setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
       }
+    } catch {
+      setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
     } finally {
       setNoteGenMsgIdx(null)
     }

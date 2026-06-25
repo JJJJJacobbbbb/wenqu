@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useSubjectStore } from '../../stores/subjectStore'
 import { useAiStore } from '../../stores/aiStore'
 import { useNoteStore } from '../../stores/noteStore'
@@ -27,16 +27,21 @@ export default function MemoryManager() {
   const subjectSessions = selectedSubjectId ? listSessionsBySubject(selectedSubjectId) : []
   const subjectNotes = selectedSubjectId ? notes.filter((n) => n.subjectId === selectedSubjectId) : []
 
-  const getSubjectStats = (subjectId: string) => {
-    const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
-    const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
-    const totalMessages = subjectSessions.reduce((sum, s) => sum + s.messages.length, 0)
-    return {
-      sessionCount: subjectSessions.length,
-      noteCount: subjectNotes.length,
-      totalMessages,
+  const subjectStatsMap = useMemo(() => {
+    const map: Record<string, { sessionCount: number; noteCount: number; totalMessages: number }> = {}
+    for (const subject of subjects) {
+      const sSessions = Object.values(sessions).filter((s) => s.subjectId === subject.id)
+      const sNotes = notes.filter((n) => n.subjectId === subject.id)
+      map[subject.id] = {
+        sessionCount: sSessions.length,
+        noteCount: sNotes.length,
+        totalMessages: sSessions.reduce((sum, s) => sum + s.messages.length, 0),
+      }
     }
-  }
+    return map
+  }, [sessions, notes, subjects])
+
+  const getSubjectStats = (subjectId: string) => subjectStatsMap[subjectId] || { sessionCount: 0, noteCount: 0, totalMessages: 0 }
 
   const handleDeleteSubject = (subjectId: string) => {
     setConfirmDialog({

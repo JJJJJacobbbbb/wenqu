@@ -68,6 +68,7 @@ const ChatMessage = React.memo(function ChatMessage({ message, isStreaming }: Ch
             onClick={handleCopy}
             className="mt-1 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
             title="复制"
+            aria-label="复制消息"
           >
             {copied ? (
               <>

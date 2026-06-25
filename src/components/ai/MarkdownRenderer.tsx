@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { marked } from 'marked'
 import katex from 'katex'
 import DOMPurify from 'dompurify'
@@ -96,13 +96,16 @@ function renderMath(text: string): string {
   return result
 }
 
+const DEBOUNCE_MS = 80
+
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastContentRef = useRef('')
 
-  useEffect(() => {
+  const doRender = useCallback((text: string) => {
     if (!ref.current) return
-
-    const deduped = removeDuplicateFormulas(content)
+    const deduped = removeDuplicateFormulas(text)
     const withMath = renderMath(deduped)
     const result = marked.parse(withMath)
 
@@ -112,19 +115,30 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
         ADD_ATTR: ['class', 'aria-hidden'],
         ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mtext', 'msqrt', 'mstyle', 'annotation', 'mglyph', 'mspace'],
       })
-      // 流式更新时避免不必要的 innerHTML 替换，保留用户文本选区
       if (ref.current.innerHTML !== finalHtml) {
         ref.current.innerHTML = finalHtml
       }
     }
 
-    // marked.parse may return string or Promise<string> depending on version
     if (typeof result === 'string') {
       render(result)
     } else {
       result.then(render)
     }
-  }, [content])
+  }, [])
+
+  useEffect(() => {
+    if (!ref.current) return
+    lastContentRef.current = content
+
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      doRender(lastContentRef.current)
+      timerRef.current = null
+    }, DEBOUNCE_MS)
+
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+  }, [content, doRender])
 
   return <div ref={ref} className="markdown-content text-sm" />
 }

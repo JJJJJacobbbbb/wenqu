@@ -29,6 +29,14 @@ export default function NoteCard({ note }: NoteCardProps) {
     }
   }, [editing])
 
+  // 外部更新笔记时同步编辑状态
+  useEffect(() => {
+    if (!editing) {
+      setEditTitle(note.title)
+      setEditContent(note.content)
+    }
+  }, [note.title, note.content, editing])
+
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation()
     setEditTitle(note.title)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
 interface ToastProps {
   message: string
@@ -10,14 +10,17 @@ interface ToastProps {
 export default function Toast({ message, type = 'info', duration = 3000, onClose }: ToastProps) {
   const [visible, setVisible] = useState(true)
 
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     let alive = true
     const timer = setTimeout(() => {
       setVisible(false)
-      setTimeout(() => { if (alive) onClose() }, 300)
+      setTimeout(() => { if (alive) onCloseRef.current() }, 300)
     }, duration)
     return () => { alive = false; clearTimeout(timer) }
-  }, [duration, onClose])
+  }, [duration])
 
   const colors = {
     info: 'bg-gray-800 text-white',

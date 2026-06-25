@@ -163,7 +163,6 @@ export const useAiStore = create<AiState>((set, get) => ({
       setTimeout(() => set({ messageDropped: false }), 2000)
       return
     }
-    sendMessageLock = true
     const screenshots = Array.isArray(screenshotData) ? screenshotData : screenshotData ? [screenshotData] : []
     const subjectStore = useSubjectStore.getState()
     const settingsStore = useSettingsStore.getState()
@@ -227,6 +226,8 @@ export const useAiStore = create<AiState>((set, get) => ({
     const needsVision = screenshots.length > 0
     let modelInfo = settingsStore.getActiveModel()
 
+    sendMessageLock = true
+    try {
     if (!modelInfo) {
       set((state) => {
         const session = state.sessions[activeSessionId!]
@@ -242,7 +243,6 @@ export const useAiStore = create<AiState>((set, get) => ({
           },
         }
       })
-      sendMessageLock = false
       return
     }
 
@@ -262,7 +262,6 @@ export const useAiStore = create<AiState>((set, get) => ({
           },
         }
       })
-      sendMessageLock = false
       return
     }
 
@@ -344,6 +343,10 @@ export const useAiStore = create<AiState>((set, get) => ({
 
       let apiUrl = config.apiUrl.trim()
       const apiKey = config.apiKey.trim()
+      // HTTPS 安全提示
+      if (apiUrl && !apiUrl.startsWith('http://localhost') && !apiUrl.startsWith('http://127.') && !apiUrl.startsWith('https://')) {
+        logger.warn('API 地址未使用 HTTPS，API Key 可能被截获')
+      }
       // 自动补全 /chat/completions 端点
       if (!/\/chat\/completions\/?$/.test(apiUrl)) {
         apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions'
@@ -538,6 +541,9 @@ export const useAiStore = create<AiState>((set, get) => ({
         }
       })
       debouncedSessionSave()
+    } finally {
+      sendMessageLock = false
+    }
     } finally {
       sendMessageLock = false
     }

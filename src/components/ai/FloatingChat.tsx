@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
 import { useAiStore } from '../../stores/aiStore'
 import { useSubjectStore } from '../../stores/subjectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { getDesktopHost } from '../../lib/desktopHost'
 import SubjectPicker from './SubjectPicker'
 import SessionControls from './SessionControls'
@@ -22,8 +23,18 @@ export default function FloatingChat() {
   const hostRef = useRef(getDesktopHost())
   const host = hostRef.current
 
-  const { getActiveSession, clearError, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore()
-  const { currentSubjectId, subjects } = useSubjectStore()
+  const { getActiveSession, clearError, switchSession, deleteSession, activeSessionId, sessions: allSessions } = useAiStore(useShallow((s) => ({
+    getActiveSession: s.getActiveSession,
+    clearError: s.clearError,
+    switchSession: s.switchSession,
+    deleteSession: s.deleteSession,
+    activeSessionId: s.activeSessionId,
+    sessions: s.sessions,
+  })))
+  const { currentSubjectId, subjects } = useSubjectStore(useShallow((s) => ({
+    currentSubjectId: s.currentSubjectId,
+    subjects: s.subjects,
+  })))
   const session = getActiveSession()
   const { scrollRef, checkScrollPosition } = useAutoScroll(
     [session?.messages.length, session?.streamingText, session?.thinkingText, session?.chatState],
@@ -83,7 +94,7 @@ export default function FloatingChat() {
             style={dragRegion}
             onClick={() => {
               // Electron drag 区域会消费 mousedown，导致 textarea 失焦
-              // 点击后手动恢复焦点
+              // 点击后手动恢复焦点（悬浮窗只有一个 textarea，安全）
               setTimeout(() => {
                 const ta = document.querySelector('textarea')
                 if (ta) ta.focus()

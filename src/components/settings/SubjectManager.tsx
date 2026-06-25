@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useSubjectStore } from '../../stores/subjectStore'
 
 export default function SubjectManager() {
@@ -7,6 +7,15 @@ export default function SubjectManager() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => { if (errorTimerRef.current) clearTimeout(errorTimerRef.current) }, [])
+
+  const showError = (msg: string) => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current)
+    setErrorMsg(msg)
+    errorTimerRef.current = setTimeout(() => setErrorMsg(''), 2000)
+  }
 
   const handleAdd = () => {
     const input = newName.trim()
@@ -24,8 +33,7 @@ export default function SubjectManager() {
     }
 
     if (added === 0 && names.length > 0) {
-      setErrorMsg('这些学科已存在')
-      setTimeout(() => setErrorMsg(''), 2000)
+      showError('这些学科已存在')
     }
     setNewName('')
   }
@@ -41,8 +49,7 @@ export default function SubjectManager() {
     if (!name) return
 
     if (subjects.some((s) => s.id !== editingId && s.name.toLowerCase() === name.toLowerCase())) {
-      setErrorMsg('该学科名称已存在')
-      setTimeout(() => setErrorMsg(''), 2000)
+      showError('该学科名称已存在')
       return
     }
 

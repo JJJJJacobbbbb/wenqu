@@ -28,10 +28,11 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
     setThinkingMode: s.setThinkingMode,
     messageDropped: s.messageDropped,
   })))
-  const { apiConfigs, setDefaultModel, getActiveModel } = useSettingsStore(useShallow((s) => ({
+  const { apiConfigs, setDefaultModel, getActiveModel, hasVisionModel } = useSettingsStore(useShallow((s) => ({
     apiConfigs: s.apiConfigs,
     setDefaultModel: s.setDefaultModel,
     getActiveModel: s.getActiveModel,
+    hasVisionModel: s.hasVisionModel,
   })))
   const { selectionMode, toggleSelectionMode } = useDocumentStore(useShallow((s) => ({
     selectionMode: s.selectionMode,
@@ -39,7 +40,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
   })))
   const session = getActiveSession()
   const isGenerating = session?.chatState === 'thinking' || session?.chatState === 'streaming'
-  const hasVisionModel = useSettingsStore.getState().hasVisionModel()
+  const hasVision = useMemo(() => hasVisionModel(), [apiConfigs])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingScreenshotsRef = useRef(pendingScreenshots)
   pendingScreenshotsRef.current = pendingScreenshots
@@ -361,7 +362,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
 
         <div className="flex items-center gap-1.5">
           {/* ---- 框选 ---- */}
-          {hasVisionModel && (
+          {hasVision && (
             <button
               onClick={async () => {
                 if (screenshotMode === 'toggle') {

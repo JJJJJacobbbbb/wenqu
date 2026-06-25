@@ -6,6 +6,16 @@ import { useSettingsStore } from '../stores/settingsStore'
 
 function getAudioModelInfo() {
   const settings = useSettingsStore.getState()
+  const activeId = settings.activeApiConfigId
+
+  // 优先从当前激活的配置中查找
+  if (activeId) {
+    const active = settings.apiConfigs.find((c) => c.id === activeId)
+    const model = active?.models.find((m) => m.audioCapable)
+    if (model && active) return { config: active, model }
+  }
+
+  // fallback: 遍历所有配置
   for (const config of settings.apiConfigs) {
     const model = config.models.find((m) => m.audioCapable)
     if (model) return { config, model }
@@ -26,10 +36,11 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 function getAudioFormat(mimeType: string): string {
-  if (mimeType.includes('wav')) return 'wav'
-  if (mimeType.includes('mp3')) return 'mp3'
-  if (mimeType.includes('webm')) return 'webm'
-  if (mimeType.includes('ogg')) return 'ogg'
+  const mt = mimeType.toLowerCase()
+  if (mt.includes('wav')) return 'wav'
+  if (mt.includes('mp3')) return 'mp3'
+  if (mt.includes('webm')) return 'webm'
+  if (mt.includes('ogg')) return 'ogg'
   return 'wav'
 }
 
@@ -50,34 +61,42 @@ export async function transcribe(audioBlob: Blob): Promise<string> {
     apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions'
   }
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${modelInfo.config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: modelInfo.model.modelId,
-      messages: [
-        { role: 'system', content: '你是一个语音转文字助手。请准确转写用户发送的语音内容，只输出转写结果，不要添加任何解释。' },
-        {
-          role: 'user',
-          content: [
-            { type: 'input_audio', input_audio: { data: base64, format } },
-          ],
-        },
-      ],
-      max_tokens: 4096,
-    }),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60_000)
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '')
-    throw new Error(`语音识别请求失败 (${response.status}): ${errText.slice(0, 100)}`)
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${modelInfo.config.apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: modelInfo.model.modelId,
+        messages: [
+          { role: 'system', content: '你是一个语音转文字助手。请准确转写用户发送的语音内容，只输出转写结果，不要添加任何解释。' },
+          {
+            role: 'user',
+            content: [
+              { type: 'input_audio', input_audio: { data: base64, format } },
+            ],
+          },
+        ],
+        max_tokens: 4096,
+      }),
+    })
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '')
+      throw new Error(`语音识别请求失败 (${response.status}): ${errText.slice(0, 100)}`)
+    }
+
+    const result = await response.json()
+    return (result.choices?.[0]?.message?.content || '').trim()
+  } finally {
+    clearTimeout(timeout)
   }
-
-  const result = await response.json()
-  return (result.choices?.[0]?.message?.content || '').trim()
 }
 
 /**

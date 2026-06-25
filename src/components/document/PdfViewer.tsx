@@ -35,9 +35,14 @@ export default function PdfViewer({ content }: PdfViewerProps) {
 
   useEffect(() => {
     measure()
-    const onResize = () => requestAnimationFrame(measure)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    // 轮询检测容器尺寸变化，确保 Electron 全屏切换时也能跟随
+    const interval = setInterval(() => {
+      if (containerRef.current) {
+        const w = containerRef.current.clientWidth
+        if (w > 0) setBaseWidth(w)
+      }
+    }, 500)
+    return () => clearInterval(interval)
   }, [measure])
 
   // 加载 PDF 并获取页信息（不渲染）

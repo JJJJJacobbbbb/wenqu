@@ -256,7 +256,7 @@ export default function ChatView({
                           disabled={isGeneratingThis}
                           className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          {isGeneratingThis ? '生成中...' : '+ 知识重点'}
+                          + 知识重点
                         </button>
                         <button
                           onClick={() => setNoteInputDialog({ msgIdx: idx, type: 'technique', extraInstructions: '' })}

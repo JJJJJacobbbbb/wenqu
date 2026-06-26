@@ -256,6 +256,12 @@ export default function NoteList() {
                 </div>
                 <p className="text-base font-medium text-gray-500">暂无笔记</p>
                 <p className="text-sm mt-1">在对话中生成笔记后会自动显示在这里</p>
+                <button
+                  onClick={closeNotes}
+                  className="mt-3 px-4 py-2 text-sm text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                >
+                  返回文档
+                </button>
               </div>
             </div>
           ) : filteredNotes.length === 0 ? (

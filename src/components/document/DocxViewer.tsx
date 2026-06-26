@@ -70,13 +70,19 @@ export default function DocxViewer({ content }: DocxViewerProps) {
       <div className="flex-1 overflow-auto bg-gray-100 p-4">
         <div className="flex justify-center">
           <div
-            ref={containerRef}
-            className="docx-viewer-container bg-white shadow-sm"
+            className="bg-white shadow-sm"
             style={{
-              transform: `scale(${zoom})`,
+              width: `fit-content`,
+              minWidth: 600,
               transformOrigin: 'top center',
             }}
-          />
+          >
+            <div
+              ref={containerRef}
+              className="docx-viewer-container"
+              style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+            />
+          </div>
         </div>
         {loading && (
           <div className="flex items-center justify-center py-8">

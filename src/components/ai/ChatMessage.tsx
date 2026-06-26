@@ -21,7 +21,7 @@ const ChatMessage = React.memo(function ChatMessage({ message, isStreaming }: Ch
       setCopied(true)
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
       copyTimerRef.current = setTimeout(() => setCopied(false), 1500)
-    })
+    }).catch(() => {})
   }, [message.content])
 
   // 验证截图数据格式，防止 XSS

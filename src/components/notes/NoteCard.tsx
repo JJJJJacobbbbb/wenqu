@@ -92,7 +92,7 @@ export default function NoteCard({ note }: NoteCardProps) {
         className={`bg-white rounded-lg border border-gray-200 transition-shadow cursor-pointer ${
           expanded ? 'p-4 shadow-md' : 'p-3 hover:shadow-md'
         }`}
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => !editing && setExpanded(!expanded)}
       >
         <div className="flex items-start justify-between mb-2">
           {editing ? (

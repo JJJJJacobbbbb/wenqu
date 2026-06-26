@@ -96,14 +96,11 @@ class ElectronHost implements DesktopHost {
     read: async (filePath: string): Promise<ArrayBuffer> => {
       const base64 = await this.host.invoke('desktop:file:read', filePath) as string
       if (!base64) return new ArrayBuffer(0)
-      // 使用 Data URL + fetch 解码 base64，比 atob 更可靠且能处理任意二进制数据
-      const dataUrl = `data:application/octet-stream;base64,${base64}`
-      try {
-        const response = await fetch(dataUrl)
-        return await response.arrayBuffer()
-      } catch {
-        return new ArrayBuffer(0)
-      }
+      // 使用 atob + Uint8Array 解码 base64，避免 Data URL 的 3x 内存开销
+      const bin = atob(base64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      return bytes.buffer
     },
     readText: async (filePath: string): Promise<string> => {
       return this.host.invoke('desktop:file:read-text', filePath) as Promise<string>

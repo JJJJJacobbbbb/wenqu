@@ -1,22 +1,59 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, clipboard, session } from 'electron'
 import path from 'path'
+import fs from 'fs/promises'
+import { realpathSync } from 'fs'
 
 const APP_ICON = path.join(__dirname, '../resources/wenqu.ico')
 
+// 全局错误处理：防止主进程崩溃
+process.on('uncaughtException', (err) => {
+  console.error('UncaughtException:', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('UnhandledRejection:', reason)
+})
+
+// 允许写入的文件扩展名（白名单）
+const ALLOWED_WRITE_EXTENSIONS = new Set([
+  '.txt', '.md', '.json', '.csv', '.log',
+  '.pdf', '.docx', '.doc',
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
+])
+
+// shell.openPath 阻止的可执行文件扩展名
+const BLOCKED_EXEC_EXTENSIONS = new Set([
+  '.exe', '.bat', '.cmd', '.com', '.msi', '.ps1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh',
+  '.scr', '.pif', '.hta', '.cpl', '.inf', '.reg', '.rgs', '.sct', '.shb', '.shs',
+])
+
+// 简易速率限制：每个 channel 每秒最多 N 次调用
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
+function checkRateLimit(channel: string, maxPerSecond = 20): boolean {
+  const now = Date.now()
+  const entry = rateLimitMap.get(channel)
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(channel, { count: 1, resetTime: now + 1000 })
+    return true
+  }
+  entry.count++
+  return entry.count <= maxPerSecond
+}
+
 function validateFilePath(filePath: string): string {
   if (!filePath || typeof filePath !== 'string') throw new Error('Invalid file path')
-  // 拒绝空字节（防止路径截断攻击）
   if (filePath.includes('\0')) throw new Error('Invalid file path: null byte')
-  // 拒绝 UNC 设备路径（\\.\, \\?\）防止直接访问物理磁盘
   if (/^\\\\[.?]/.test(filePath)) throw new Error('Access to device path is blocked')
-  const resolved = path.resolve(filePath)
-  // 检查 Windows 保留设备名
+  let resolved = path.resolve(filePath)
+  // 解析符号链接，防止 symlink 绕过路径检查
+  try { resolved = fs.realpathSync(resolved) } catch { /* path doesn't exist yet, use resolved */ }
   const basename = path.basename(resolved).split('.')[0].toUpperCase()
   const reserved = ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9']
   if (reserved.includes(basename)) throw new Error('Access to reserved device name is blocked')
   const blocked = [
     process.env.SystemRoot || 'C:\\Windows',
-    '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin',
+    process.env['PROGRAMFILES'] || 'C:\\Program Files',
+    process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)',
+    '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin', '/usr/lib', '/usr/local', '/var', '/tmp',
   ]
   for (const prefix of blocked) {
     if (resolved.toLowerCase().startsWith(prefix.toLowerCase())) {
@@ -47,7 +84,7 @@ let chatWindow: BrowserWindow | null = null
 let chatWindowCreating = false
 let tray: Tray | null = null
 
-const isDev = process.env.NODE_ENV === 'development'
+const isDev = !app.isPackaged
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -61,6 +98,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
     show: false,
   })
@@ -112,6 +150,7 @@ function createChatWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
 
@@ -138,9 +177,10 @@ function createChatWindow() {
     chatWindowCreating = false
   })
 
-  // 超时保护：10 秒内未 ready 则重置标志，防止死锁
+  // 超时保护：10 秒内未 ready 则关闭窗口并重置标志，防止死锁
   setTimeout(() => {
     if (chatWindowCreating && chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.close()
       chatWindowCreating = false
     }
   }, 10000)
@@ -188,6 +228,7 @@ function createTray() {
 
 function registerIpcHandlers() {
   ipcMain.handle('desktop:window:minimize', () => {
+    if (!checkRateLimit('desktop:window:minimize')) return
     mainWindow?.minimize()
   })
 
@@ -210,6 +251,7 @@ function registerIpcHandlers() {
   let isScreenshotActive = false
 
   ipcMain.handle('desktop:screenshot:start-select', async () => {
+    if (!checkRateLimit('desktop:screenshot:start-select', 5)) return null
     if (isScreenshotActive) return null
     isScreenshotActive = true
 
@@ -229,6 +271,7 @@ function registerIpcHandlers() {
           preload: path.join(__dirname, 'preload.js'),
           contextIsolation: true,
           nodeIntegration: false,
+          sandbox: true,
         },
       })
 
@@ -287,38 +330,53 @@ function registerIpcHandlers() {
     })
   })
 
+  const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
+
   ipcMain.handle('desktop:file:read-text', async (_event, filePath: string) => {
+    if (!checkRateLimit('desktop:file:read-text', 20)) throw new Error('操作过于频繁')
     const resolved = validateFilePath(filePath)
-    const fs = await import('fs/promises')
+    const stat = await fs.stat(resolved)
+    if (stat.size > MAX_FILE_SIZE) throw new Error('文件过大，请限制在 100MB 以内')
     return fs.readFile(resolved, 'utf-8')
   })
 
   ipcMain.handle('desktop:file:read', async (_event, filePath: string) => {
+    if (!checkRateLimit('desktop:file:read', 20)) throw new Error('操作过于频繁')
     const resolved = validateFilePath(filePath)
-    const fs = await import('fs/promises')
+    const stat = await fs.stat(resolved)
+    if (stat.size > MAX_FILE_SIZE) throw new Error('文件过大，请限制在 100MB 以内')
     const buffer = await fs.readFile(resolved)
     return buffer.toString('base64')
   })
 
   ipcMain.handle('desktop:file:write', async (_event, filePath: string, data: ArrayBuffer | string) => {
+    if (!checkRateLimit('desktop:file:write', 10)) throw new Error('操作过于频繁')
     const resolved = validateFilePath(filePath)
-    const fs = await import('fs/promises')
-    const buffer = typeof data === 'string' ? Buffer.from(data) : Buffer.from(data)
+    const ext = path.extname(resolved).toLowerCase()
+    if (ext && !ALLOWED_WRITE_EXTENSIONS.has(ext)) {
+      throw new Error(`不允许写入 ${ext} 类型的文件`)
+    }
+    const buffer = typeof data === 'string' ? Buffer.from(data, 'utf-8') : Buffer.from(data)
+    if (buffer.length > MAX_FILE_SIZE) throw new Error('写入数据过大，请限制在 100MB 以内')
     await fs.writeFile(resolved, buffer)
   })
 
   ipcMain.handle('desktop:file:list', async (_event, dirPath: string) => {
     const resolved = validateFilePath(dirPath)
-    const fs = await import('fs/promises')
     return fs.readdir(resolved)
   })
 
   ipcMain.handle('desktop:dialog:open', async (_event, options) => {
+    if (!checkRateLimit('desktop:dialog:open', 5)) return []
     const { dialog } = await import('electron')
     if (!mainWindow) return []
+    const allowedProps = ['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles', 'createDirectory', 'promptToCreate', 'noResolveAliases', 'treatPackageAsDirectory', 'dontAddToRecent']
+    const safeProperties = Array.isArray(options?.properties)
+      ? options.properties.filter((p: string) => allowedProps.includes(p))
+      : ['openFile']
     const result = await dialog.showOpenDialog(mainWindow, {
-      properties: options?.properties || ['openFile'],
-      filters: options?.filters,
+      properties: safeProperties,
+      filters: Array.isArray(options?.filters) ? options.filters : undefined,
     })
     return result.filePaths
   })
@@ -327,7 +385,7 @@ function registerIpcHandlers() {
     const { dialog } = await import('electron')
     if (!mainWindow) return ''
     const result = await dialog.showSaveDialog(mainWindow, {
-      filters: options?.filters,
+      filters: Array.isArray(options?.filters) ? options.filters : undefined,
     })
     return result.filePath
   })
@@ -337,10 +395,14 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('desktop:clipboard:write-text', async (_event, text: string) => {
+    if (!checkRateLimit('desktop:clipboard:write-text', 10)) throw new Error('操作过于频繁')
+    if (typeof text !== 'string') throw new Error('Invalid clipboard data')
+    if (text.length > 1024 * 1024) throw new Error('Clipboard data too large')
     clipboard.writeText(text)
   })
 
   ipcMain.handle('desktop:shell:open-external', async (_event, url: string) => {
+    if (!checkRateLimit('desktop:shell:open-external', 5)) throw new Error('操作过于频繁')
     if (!url || typeof url !== 'string') throw new Error('Invalid URL')
     // Only allow http/https protocols for security
     if (!/^https?:\/\//i.test(url)) throw new Error('Only http/https URLs allowed')
@@ -350,13 +412,18 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:shell:open-path', async (_event, openPath: string) => {
     const resolved = validateFilePath(openPath)
+    const ext = path.extname(resolved).toLowerCase()
+    if (BLOCKED_EXEC_EXTENSIONS.has(ext)) {
+      throw new Error(`不允许打开可执行文件: ${ext}`)
+    }
     const { shell } = await import('electron')
     const result = await shell.openPath(resolved)
     if (result) throw new Error(result)
   })
 
   ipcMain.handle('desktop:open-file', async (_event, filePath: string) => {
-    mainWindow?.webContents.send('open-file', { filePath })
+    const resolved = validateFilePath(filePath)
+    mainWindow?.webContents.send('open-file', { filePath: resolved })
   })
 
   ipcMain.handle('desktop:app:quit', () => {
@@ -376,6 +443,19 @@ function registerIpcHandlers() {
       const scaleFactor = primaryDisplay.scaleFactor // e.g., 1.0, 1.25, 1.5, 2.0
       const { width: screenW, height: screenH } = primaryDisplay.size // 逻辑像素
 
+      // 获取主窗口所在显示器的 DPI（多显示器适配）
+      const winBounds = mainWindow.getBounds()
+      let windowScaleFactor = scaleFactor
+      try {
+        const display = screen.getDisplayMatching({
+          x: winBounds.x,
+          y: winBounds.y,
+          width: winBounds.width,
+          height: winBounds.height,
+        })
+        windowScaleFactor = display.scaleFactor
+      } catch { /* fallback to primary */ }
+
       // 捕获全屏（按物理像素）
       const physW = Math.round(screenW * scaleFactor)
       const physH = Math.round(screenH * scaleFactor)
@@ -389,22 +469,18 @@ function registerIpcHandlers() {
       const imgW = fullImage.getSize().width
       const imgH = fullImage.getSize().height
 
-      // 获取主窗口位置（逻辑像素，屏幕坐标）
-      const winBounds = mainWindow.getBounds()
-
       // 视口 CSS 坐标 → 屏幕物理像素
-      // viewportX/Y 是相对于浏览器视口的 CSS 像素
-      // winBounds.x/y 是窗口在屏幕上的逻辑像素位置
-      const screenPhysX = Math.round((selection.viewportX + winBounds.x) * scaleFactor)
-      const screenPhysY = Math.round((selection.viewportY + winBounds.y) * scaleFactor)
+      // 使用窗口所在显示器的 DPI 而非主显示器 DPI
+      const screenPhysX = Math.round((selection.viewportX + winBounds.x) * windowScaleFactor)
+      const screenPhysY = Math.round((selection.viewportY + winBounds.y) * windowScaleFactor)
 
       // 计算截图图片与物理屏幕的比例（desktopCapturer 可能不完全按请求尺寸）
       const ratioX = imgW / physW
       const ratioY = imgH / physH
 
-      // 选区物理尺寸
-      const selW = Math.round(selection.width * scaleFactor * ratioX)
-      const selH = Math.round(selection.height * scaleFactor * ratioY)
+      // 选区物理尺寸（使用窗口 DPI）
+      const selW = Math.round(selection.width * windowScaleFactor * ratioX)
+      const selH = Math.round(selection.height * windowScaleFactor * ratioY)
 
       if (selW < 1 || selH < 1) return null
 
@@ -537,6 +613,29 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   createMainWindow()
   createTray()
+
+  // CSP: 设置 Content-Security-Policy
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https:; object-src 'none'; base-uri 'none'; form-action 'none';"
+        ],
+        'X-Content-Type-Options': ['nosniff'],
+      },
+    })
+  })
+
+  // 拦截 window.open，阻止渲染进程创建不受控的新窗口
+  session.defaultSession.setWindowOpenHandler(() => {
+    return { action: 'deny' }
+  })
+
+  // 拒绝所有权限请求（摄像头、麦克风、地理位置等）
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false)
+  })
 })
 
 app.on('window-all-closed', () => {

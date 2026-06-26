@@ -88,7 +88,7 @@ function migrateConfig(raw: Record<string, unknown>): ApiConfig {
         id: generateId('model'),
         name: raw.model as string,
         modelId: raw.model as string,
-        hasVision: true,
+        hasVision: /gpt-4o|claude|gemini|vision|vl/i.test(raw.model as string),
         maxContextTokens: DEFAULT_MAX_TOKENS,
       }],
     }
@@ -305,7 +305,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
     } catch (e) {
-      logger.error('保存设置失败', e)
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        logger.error('localStorage 空间不足，设置保存失败')
+      } else {
+        logger.error('保存设置失败', e)
+      }
     }
   },
 }))

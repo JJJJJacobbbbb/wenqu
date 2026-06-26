@@ -1,6 +1,6 @@
 // UI 相关常量
 export const FOCUS_DELAY_MS = 100
-export const TEXTAREA_MAX_HEIGHT = 80
+export const TEXTAREA_MAX_HEIGHT = 160
 export const MIN_SELECTION_SIZE = 3
 
 // 模型相关常量

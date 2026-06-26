@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { noDragRegion } from '../../lib/styles'
 
@@ -6,7 +7,10 @@ interface WinControlsProps {
 }
 
 export default function WinControls({ className = '' }: WinControlsProps) {
-  const host = getDesktopHost()
+  // 延迟获取 host，避免 preload 未就绪时选错实现
+  const hostRef = useRef<ReturnType<typeof getDesktopHost> | null>(null)
+  if (!hostRef.current) hostRef.current = getDesktopHost()
+  const host = hostRef.current
 
   return (
     <div className={`flex h-full ${className}`} style={noDragRegion}>

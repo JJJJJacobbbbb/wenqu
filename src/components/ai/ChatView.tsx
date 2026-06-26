@@ -3,8 +3,9 @@ import { useAiStore } from '../../stores/aiStore'
 import { useSubjectStore } from '../../stores/subjectStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
-import { useNoteStore, NOTE_CATEGORY_LABELS, type NoteCategory, type GeneratedNoteData } from '../../stores/noteStore'
+import { useNoteStore, type NoteCategory, type GeneratedNoteData } from '../../stores/noteStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { logger } from '../../lib/logger'
 import ChatMessage from './ChatMessage'
 import ChatInput from './ChatInput'
 import SubjectPicker from './SubjectPicker'
@@ -60,7 +61,7 @@ export default function ChatView({
     apiConfigs: s.apiConfigs,
   })))
   const session = getActiveSession()
-  const { scrollRef, checkScrollPosition } = useAutoScroll(
+  const { scrollRef, checkScrollPosition, scrollToBottom } = useAutoScroll(
     [session?.messages.length, session?.streamingText, session?.thinkingText, session?.chatState],
     activeSessionId
   )
@@ -69,30 +70,54 @@ export default function ChatView({
   const [historyFilter, setHistoryFilter] = useState<'all' | 'current'>('all')
   const [toastMsg, setToastMsg] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null)
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
+  const [isNearBottom, setIsNearBottom] = useState(true)
+  const rafRef = useRef(0)
+  const handleScroll = useCallback(() => {
+    if (rafRef.current) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0
+      checkScrollPosition()
+      const el = scrollRef.current
+      if (el) setIsNearBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 100)
+    })
+  }, [checkScrollPosition])
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }, [])
 
-  // 统一笔记弹窗：input → generating → preview
+  // 笔记弹窗
   const [noteDialog, setNoteDialog] = useState<{
     msgIdx: number
     type: NoteCategory
-    phase: 'input' | 'generating' | 'preview'
+    phase: 'idle' | 'generating' | 'done'
     extraInstructions: string
     result: GeneratedNoteData | null
+    userMsg?: string
+    aiMsg?: string
   } | null>(null)
+  const [showSourceContext, setShowSourceContext] = useState(false)
   const [noteTitle, setNoteTitle] = useState('')
   const [noteChapter, setNoteChapter] = useState('')
   const [noteContent, setNoteContent] = useState('')
   const noteSavingRef = useRef(false)
+  const noteAbortRef = useRef<AbortController | null>(null)
+
+  // 关闭笔记弹窗时中止生成
+  const closeNoteDialog = useCallback(() => {
+    noteAbortRef.current?.abort()
+    noteAbortRef.current = null
+    setNoteDialog(null)
+    setShowSourceContext(false)
+  }, [])
 
   // Escape 关闭笔记弹窗
   useEffect(() => {
     if (!noteDialog) return
     noteSavingRef.current = false
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setNoteDialog(null)
+      if (e.key === 'Escape') closeNoteDialog()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [noteDialog])
+  }, [noteDialog, closeNoteDialog])
 
   useEffect(() => {
     const all = useAiStore.getState().sessions
@@ -120,32 +145,42 @@ export default function ChatView({
   }, [subjects])
 
   const handleNoteGenerate = useCallback(async () => {
-    if (!session || !noteDialog || noteDialog.phase !== 'input') return
+    if (!session || !noteDialog || noteDialog.phase === 'generating') return
     const { msgIdx, type, extraInstructions } = noteDialog
-    setNoteContent('')
-    setNoteDialog({ ...noteDialog, phase: 'generating' })
-    try {
-      let userMsg = ''
-      for (let i = msgIdx - 1; i >= 0; i--) {
-        if (session.messages[i].role === 'user') {
-          userMsg = session.messages[i].content
-          break
-        }
+    // bounds check
+    if (msgIdx < 0 || msgIdx >= session.messages.length) return
+    // 在 await 前捕获消息内容，避免 session 切换后闭包过期
+    let userMsg = ''
+    for (let i = msgIdx - 1; i >= 0; i--) {
+      if (session.messages[i].role === 'user') {
+        userMsg = session.messages[i].content
+        break
       }
-      const aiMsg = session.messages[msgIdx].content
-      const result = await generateNoteStream(userMsg, aiMsg, currentSubjectId, type, (text) => setNoteContent(text), extraInstructions || undefined)
+    }
+    const aiMsg = session.messages[msgIdx].content
+    setNoteContent('')
+    setNoteDialog({ ...noteDialog, phase: 'generating', extraInstructions: '' })
+    const abortController = new AbortController()
+    noteAbortRef.current = abortController
+    try {
+      const result = await generateNoteStream(userMsg, aiMsg, currentSubjectId, type, (text) => setNoteContent(text), extraInstructions || undefined, abortController.signal)
+      if (abortController.signal.aborted) return
       if (result) {
         setNoteTitle(result.title)
         setNoteChapter(result.chapter)
         setNoteContent(result.content)
-        setNoteDialog({ ...noteDialog, phase: 'preview', result })
+        setNoteDialog({ ...noteDialog, phase: 'done', result })
       } else {
         setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
         setNoteDialog(null)
       }
-    } catch {
+    } catch (err) {
+      if (abortController.signal.aborted) return
+      logger.error('笔记生成失败', err)
       setToastMsg({ message: '笔记生成失败，请检查 AI 模型配置是否正确。', type: 'error' })
       setNoteDialog(null)
+    } finally {
+      noteAbortRef.current = null
     }
   }, [session, noteDialog, currentSubjectId, generateNoteStream])
 
@@ -269,7 +304,7 @@ export default function ChatView({
           )}
         </div>
       ) : (
-        <div ref={scrollRef} onScroll={checkScrollPosition} className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-4 relative">
           {session?.messages.map((message, idx) => {
             const isGeneratingThis = noteDialog?.msgIdx === idx && noteDialog.phase === 'generating'
             return (
@@ -282,20 +317,23 @@ export default function ChatView({
                   session.chatState === 'idle' &&
                   message.content && message.content !== '(无响应内容)' && (
                   <div className="flex justify-start mt-1">
-                    <div className="ml-0 max-w-[85%]">
-                      <div className="flex gap-1">
-                        {NOTE_TYPES.map(({ type, label }) => (
-                          <button
-                            key={type}
-                            onClick={() => setNoteDialog({ msgIdx: idx, type, phase: 'input', extraInstructions: '', result: null })}
-                            disabled={isGeneratingThis}
-                            className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            + {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    <button
+                      onClick={() => {
+                        let userMsg = ''
+                        for (let i = idx - 1; i >= 0; i--) {
+                          if (session!.messages[i].role === 'user') { userMsg = session!.messages[i].content; break }
+                        }
+                        setShowSourceContext(false)
+                        setNoteTitle('')
+                        setNoteChapter('')
+                        setNoteContent('')
+                        setNoteDialog({ msgIdx: idx, type: 'knowledge', phase: 'idle', extraInstructions: '', result: null, userMsg, aiMsg: message.content })
+                      }}
+                      disabled={isGeneratingThis}
+                      className="text-[10px] px-2 py-0.5 text-purple-500 hover:bg-purple-50 rounded border border-purple-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      + 生成笔记
+                    </button>
                   </div>
                 )}
               </div>
@@ -382,6 +420,16 @@ export default function ChatView({
               </div>
             </div>
           )}
+
+          {!isNearBottom && (
+            <button
+              onClick={() => { setIsNearBottom(true); scrollToBottom() }}
+              className="sticky bottom-2 ml-auto mr-1 w-fit px-3 py-1.5 text-xs text-gray-600 bg-white border border-gray-200 rounded-full shadow-md hover:bg-gray-50 transition-colors z-10"
+              aria-label="滚动到最新消息"
+            >
+              ↓ 最新
+            </button>
+          )}
         </div>
       )}
 
@@ -389,97 +437,134 @@ export default function ChatView({
         <ChatInput screenshotMode={screenshotMode} />
       </div>
 
-      {/* 笔记弹窗：统一 input / generating / preview 三个阶段 */}
+      {/* 笔记弹窗 */}
       {noteDialog && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => noteDialog.phase !== 'generating' && setNoteDialog(null)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            {/* 头部 */}
-            <div className="p-4 border-b border-gray-100 shrink-0">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-base font-semibold text-gray-800">
-                  {noteDialog.phase === 'preview' ? '笔记预览' : `生成${NOTE_CATEGORY_LABELS[noteDialog.type]}笔记`}
-                </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-600">
-                  {NOTE_CATEGORY_LABELS[noteDialog.type]}
-                </span>
-              </div>
-              {noteDialog.phase === 'preview' ? (
-                <div className="space-y-2">
-                  <input
-                    value={noteTitle}
-                    onChange={(e) => setNoteTitle(e.target.value)}
-                    className="w-full text-sm font-medium text-gray-800 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
-                    placeholder="笔记标题"
-                  />
-                  <input
-                    value={noteChapter}
-                    onChange={(e) => setNoteChapter(e.target.value)}
-                    className="w-full text-xs text-gray-600 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
-                    placeholder="章节（可选）"
-                  />
-                </div>
-              ) : (
-                <>
-                  <p className="text-xs text-gray-400 mb-3">可补充说明，让笔记更贴合你的需求</p>
-                  <textarea
-                    value={noteDialog.extraInstructions}
-                    onChange={(e) => setNoteDialog({ ...noteDialog, extraInstructions: e.target.value })}
-                    placeholder="例如：重点写公式推导过程、用表格对比..."
-                    className="w-full h-24 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:border-blue-400"
-                    autoFocus={noteDialog.phase === 'input'}
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-6" onClick={closeNoteDialog} role="dialog" aria-modal="true" aria-label="笔记预览">
+          <div className="bg-white rounded-xl shadow-2xl w-[720px] h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* 标签切换 + 标题 */}
+            <div className="flex items-center border-b border-gray-100 shrink-0">
+              <div className="flex">
+                {NOTE_TYPES.map(({ type, label }) => (
+                  <button
+                    key={type}
+                    onClick={() => setNoteDialog({ ...noteDialog, type })}
                     disabled={noteDialog.phase === 'generating'}
-                  />
-                </>
-              )}
+                    className={`px-4 py-3 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      noteDialog.type === type
+                        ? 'text-purple-600 border-b-2 border-purple-500'
+                        : 'text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1" />
+              <button
+                onClick={closeNoteDialog}
+                className="p-2 mr-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                aria-label="关闭"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
 
-            {/* 内容区 */}
-            {(noteDialog.phase === 'generating' || noteDialog.phase === 'preview') && (
-              <div className="flex-1 min-h-0 p-4">
-                <textarea
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  readOnly={noteDialog.phase === 'generating'}
-                  className="w-full h-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:border-blue-400"
-                />
+            {/* 原始对话摘要 */}
+            {(noteDialog.userMsg || noteDialog.aiMsg) && (
+              <div className="px-5 pt-2 shrink-0">
+                <button
+                  onClick={() => setShowSourceContext(!showSourceContext)}
+                  className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+                >
+                  <svg className={`w-3 h-3 transition-transform ${showSourceContext ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  查看原始对话
+                </button>
+                {showSourceContext && (
+                  <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-2 max-h-40 overflow-y-auto">
+                    {noteDialog.userMsg && (
+                      <p className="text-gray-600"><span className="font-medium">问：</span>{noteDialog.userMsg.length > 200 ? noteDialog.userMsg.slice(0, 200) + '...' : noteDialog.userMsg}</p>
+                    )}
+                    {noteDialog.aiMsg && (
+                      <p className="text-gray-500"><span className="font-medium">答：</span>{noteDialog.aiMsg.length > 200 ? noteDialog.aiMsg.slice(0, 200) + '...' : noteDialog.aiMsg}</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* 底部按钮 */}
-            <div className="p-4 border-t border-gray-100 flex gap-2 shrink-0">
-              {noteDialog.phase === 'preview' ? (
-                <>
-                  <button
-                    onClick={handleNoteSave}
-                    className="flex-1 py-2 text-sm text-white bg-purple-500 hover:bg-purple-600 rounded transition-colors"
-                  >
-                    保存笔记
-                  </button>
-                  <button
-                    onClick={() => setNoteDialog(null)}
-                    className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-                  >
-                    取消
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={handleNoteGenerate}
-                    disabled={noteDialog.phase === 'generating'}
-                    className="flex-1 py-2 text-sm text-white bg-purple-500 hover:bg-purple-600 rounded transition-colors disabled:opacity-50"
-                  >
-                    {noteDialog.phase === 'generating' ? '生成中...' : '生成笔记'}
-                  </button>
-                  <button
-                    onClick={() => setNoteDialog(null)}
-                    disabled={noteDialog.phase === 'generating'}
-                    className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
-                  >
-                    取消
-                  </button>
-                </>
+            {/* 标题和章节 */}
+            <div className="px-5 pt-4 pb-3 flex gap-3 shrink-0">
+              <input
+                value={noteTitle}
+                onChange={(e) => setNoteTitle(e.target.value)}
+                disabled={noteDialog.phase === 'generating'}
+                className="flex-1 text-sm font-medium text-gray-800 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 disabled:opacity-50"
+                placeholder="笔记标题"
+              />
+              <input
+                value={noteChapter}
+                onChange={(e) => setNoteChapter(e.target.value)}
+                disabled={noteDialog.phase === 'generating'}
+                className="w-40 text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 disabled:opacity-50"
+                placeholder="章节"
+              />
+            </div>
+
+            {/* 内容区 */}
+            <div className="flex-1 min-h-0 px-5 pb-3">
+              {noteDialog.phase === 'generating' && !noteContent && (
+                <div className="flex items-center justify-center h-full">
+                  <div className="flex items-center gap-2 text-purple-500">
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                    <span className="text-sm">整理笔记中...</span>
+                  </div>
+                </div>
               )}
+              <textarea
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                readOnly={noteDialog.phase === 'generating'}
+                className={`w-full h-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-4 resize-none focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 leading-relaxed ${noteDialog.phase === 'generating' && !noteContent ? 'invisible' : ''}`}
+              />
+            </div>
+
+            {/* 底部：指令输入 + 按钮 */}
+            <div className="px-5 pb-4 pt-2 border-t border-gray-100 shrink-0">
+              <div className="flex gap-2 mb-3">
+                <input
+                  value={noteDialog.extraInstructions}
+                  onChange={(e) => setNoteDialog({ ...noteDialog, extraInstructions: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && noteDialog.phase !== 'generating') { e.preventDefault(); handleNoteGenerate() } }}
+                  placeholder="请输入笔记要求"
+                  disabled={noteDialog.phase === 'generating'}
+                  className="flex-1 text-sm text-gray-700 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 disabled:opacity-50"
+                />
+                <button
+                  onClick={handleNoteGenerate}
+                  disabled={noteDialog.phase === 'generating'}
+                  className="px-4 py-2 text-sm font-medium text-white bg-purple-500 hover:bg-purple-600 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {noteDialog.phase === 'generating' ? '生成中...' : (noteDialog.phase === 'idle' ? '生成笔记' : '重新生成')}
+                </button>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={closeNoteDialog}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleNoteSave}
+                  className="px-6 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
+                >
+                  保存
+                </button>
+              </div>
             </div>
           </div>
         </div>

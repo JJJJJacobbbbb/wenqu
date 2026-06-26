@@ -7,10 +7,11 @@ export default function SubjectPicker() {
   const { subjects, currentSubjectId, setCurrentSubject, addSubject } = useSubjectStore()
   const [open, setOpen] = useState(false)
   const [newName, setNewName] = useState('')
+  const [dupError, setDupError] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const closeDropdown = useCallback(() => { setOpen(false); setNewName('') }, [])
+  const closeDropdown = useCallback(() => { setOpen(false); setNewName(''); setDupError(false) }, [])
   useClickOutside(dropdownRef, closeDropdown)
 
   const currentSubject = subjects.find((s) => s.id === currentSubjectId) || subjects[0]
@@ -19,12 +20,13 @@ export default function SubjectPicker() {
     const name = newName.trim()
     if (!name) return
     if (subjects.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
-      setNewName('')
+      setDupError(true)
       return
     }
     const id = addSubject(name)
     setCurrentSubject(id)
     setNewName('')
+    setDupError(false)
     setOpen(false)
   }
 
@@ -67,6 +69,7 @@ export default function SubjectPicker() {
                 style={{ backgroundColor: s.color }}
               />
               <span className="truncate">{s.name}</span>
+              {s.id === 'main' && <span className="text-[9px] text-gray-400 ml-auto">默认</span>}
               {s.id === currentSubjectId && (
                 <svg className="w-3 h-3 ml-auto text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -80,16 +83,17 @@ export default function SubjectPicker() {
                 ref={inputRef}
                 type="text"
                 value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+                onChange={(e) => { setNewName(e.target.value); setDupError(false) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
-                placeholder="新建学科"
-                className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-300"
+                placeholder={dupError ? '学科已存在' : '新建学科'}
+                className={`flex-1 px-2 py-1 text-xs border rounded focus:outline-none ${dupError ? 'border-red-300 focus:border-red-400 text-red-600' : 'border-gray-200 focus:border-blue-300'}`}
                 onClick={(e) => e.stopPropagation()}
               />
               <button
                 onClick={handleAdd}
                 disabled={!newName.trim()}
                 className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 flex-shrink-0"
+                aria-label="添加学科"
               >
                 +
               </button>

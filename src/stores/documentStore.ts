@@ -4,6 +4,8 @@ import { getFileType } from '../lib/utils/fileType'
 import { logger } from '../lib/logger'
 import { generateId } from '../lib/id'
 
+const DOC_PREFS_KEY = 'student-assistant-doc-prefs'
+
 export interface DocumentTab {
   id: string
   filePath: string
@@ -28,13 +30,30 @@ interface DocumentState {
   setSelectionMode: (mode: boolean) => void
 }
 
+function loadSelectionMode(): boolean {
+  try {
+    const saved = localStorage.getItem(DOC_PREFS_KEY)
+    if (saved) return !!JSON.parse(saved).selectionMode
+  } catch { /* ignore */ }
+  return false
+}
+
 export const useDocumentStore = create<DocumentState>((set, get) => ({
   tabs: [],
   activeTabId: null,
-  selectionMode: false,
+  selectionMode: loadSelectionMode(),
 
-  toggleSelectionMode: () => set((s) => ({ selectionMode: !s.selectionMode })),
-  setSelectionMode: (mode) => set({ selectionMode: mode }),
+  toggleSelectionMode: () => {
+    set((s) => {
+      const next = !s.selectionMode
+      localStorage.setItem(DOC_PREFS_KEY, JSON.stringify({ selectionMode: next }))
+      return { selectionMode: next }
+    })
+  },
+  setSelectionMode: (mode) => {
+    set({ selectionMode: mode })
+    localStorage.setItem(DOC_PREFS_KEY, JSON.stringify({ selectionMode: mode }))
+  },
 
   openFile: async (filePath) => {
     // 去重：如果已有相同文件路径的标签，直接激活

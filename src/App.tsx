@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react'
+import { useEffect, lazy, Suspense, useState } from 'react'
 import { useTabStore } from './stores/tabStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useNoteStore } from './stores/noteStore'
@@ -8,6 +8,7 @@ import { getDesktopHost } from './lib/desktopHost'
 import { logger } from './lib/logger'
 import DocumentViewer from './components/document/DocumentViewer'
 import ErrorBoundary from './components/shared/ErrorBoundary'
+import Toast from './components/shared/Toast'
 
 const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
 const NoteList = lazy(() => import('./components/notes/NoteList'))
@@ -19,6 +20,7 @@ function App() {
   const loadNotes = useNoteStore((s) => s.loadFromStorage)
   const loadSubjects = useSubjectStore((s) => s.loadFromStorage)
   const loadSessions = useAiStore((s) => s.loadFromStorage)
+  const [storageWarning, setStorageWarning] = useState<string | null>(null)
 
   useEffect(() => {
     loadSettings()
@@ -37,12 +39,23 @@ function App() {
     return () => { unmounted = true; cleanup?.() }
   }, [])
 
-  // Escape 键返回文档页
+  // 监听存储空间警告
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail
+      if (typeof msg === 'string') setStorageWarning(msg)
+    }
+    window.addEventListener('storage-warning', handler)
+    return () => window.removeEventListener('storage-warning', handler)
+  }, [])
+
+  // Escape 键返回文档页（输入框内不触发）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeTabType !== 'document') {
-        openDocument()
-      }
+      if (e.key !== 'Escape' || activeTabType === 'document') return
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return
+      openDocument()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -79,6 +92,9 @@ function App() {
           </div>
         )}
       </div>
+      {storageWarning && (
+        <Toast message={storageWarning} type="error" onClose={() => setStorageWarning(null)} />
+      )}
     </ErrorBoundary>
   )
 }

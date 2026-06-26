@@ -52,16 +52,19 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
   const [modelOpen, setModelOpen] = useState(false)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
-  const [audioPreview, setAudioPreview] = useState<{ url: string; blob: Blob } | null>(null)
-  const audioPreviewRef = useRef<{ url: string; blob: Blob } | null>(null)
+  const [audioPreview, setAudioPreview] = useState<{ url: string; blob: Blob; duration: number } | null>(null)
+  const audioPreviewRef = useRef<{ url: string; blob: Blob; duration: number } | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [showCaptureHint, setShowCaptureHint] = useState(false)
   const captureTimers = useRef<number[]>([])
 
-  // 清理截图提示定时器 + 音频预览 URL
+  // 清理截图提示定时器 + 音频预览 URL + 录音中则停止
   useEffect(() => () => {
     captureTimers.current.forEach(clearTimeout)
     if (audioPreviewRef.current?.url) URL.revokeObjectURL(audioPreviewRef.current.url)
+    if (isRecordingRef.current && recorderRef.current) {
+      try { recorderRef.current.stop() } catch { /* already stopped */ }
+    }
   }, [])
 
   // 保持 ref 与 state 同步，避免 toggleRecording 闭包过期
@@ -158,7 +161,12 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
       if (result.text) setInput((prev) => prev + result.text)
       // 释放旧的音频 URL
       if (audioPreviewRef.current?.url) URL.revokeObjectURL(audioPreviewRef.current.url)
-      const preview = { url: result.audioUrl, blob: result.audioBlob }
+      const audio = new Audio(result.audioUrl)
+      const duration = await new Promise<number>((resolve) => {
+        audio.addEventListener('loadedmetadata', () => resolve(audio.duration || 0), { once: true })
+        audio.addEventListener('error', () => resolve(0), { once: true })
+      })
+      const preview = { url: result.audioUrl, blob: result.audioBlob, duration }
       audioPreviewRef.current = preview
       setAudioPreview(preview)
     } catch (err) {
@@ -213,7 +221,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
       {pendingScreenshots.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {pendingScreenshots.map((src, i) => (
-            <div key={i} className="relative inline-block cursor-pointer group" onClick={() => setPreviewImage(src)}>
+            <div key={`${src.length}-${i}`} className="relative inline-block cursor-pointer group" onClick={() => setPreviewImage(src)}>
               <img src={src} alt={`截图 ${i + 1}`} className="max-h-16 max-w-[140px] rounded border border-gray-200 group-hover:border-blue-300 transition-colors" />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded transition-colors flex items-center justify-center">
                 <svg className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -247,12 +255,11 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
             </svg>
           </button>
           <audio ref={audioRef} src={audioPreview.url} className="hidden" />
-          <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-400 rounded-full animate-pulse" style={{ width: '60%' }} />
-          </div>
-          <span className="text-[10px] text-gray-400">录音完成</span>
+          <div className="flex-1" />
+          <span className="text-[10px] text-gray-400">{audioPreview.duration > 0 ? `${Math.round(audioPreview.duration)}s` : '录音完成'}</span>
           <button
             onClick={() => {
+              if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = '' }
               if (audioPreview.url) URL.revokeObjectURL(audioPreview.url)
               audioPreviewRef.current = null
               setAudioPreview(null)
@@ -283,7 +290,7 @@ export default function ChatInput({ screenshotMode = 'toggle' }: ChatInputProps 
         placeholder="输入问题..."
         className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         rows={2}
-        style={{ maxHeight: 80 }}
+        style={{ maxHeight: 160 }}
         disabled={isGenerating}
       />
 

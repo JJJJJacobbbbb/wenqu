@@ -78,22 +78,38 @@ function renderKatex(text: string, regex: RegExp, displayMode: boolean): string 
   })
 }
 
+// KaTeX 输出的 HTML 中包含 * 字符，会被 marked 误解为强调标记
+// 先提取 KaTeX HTML 占位，再跑 marked，最后还原
 function renderMath(text: string): string {
   let result = text
 
   // $$...$$ — display math
   result = renderKatex(result, /\$\$([\s\S]+?)\$\$/g, true)
 
-  // \[...\] — display math
-  result = renderKatex(result, /\\\[([\s\S]+?)\\\]/g, true)
+  // \\[...\] or \[...\] — display math (support both double and single backslash)
+  result = renderKatex(result, /\\\\?\[([\s\S]+?)\\\\?\]/g, true)
 
-  // \(...\) — inline math
-  result = renderKatex(result, /\\\((.+?)\\\)/g, false)
+  // \\(...\\) or \(...\) — inline math (support both double and single backslash)
+  result = renderKatex(result, /\\\\?\((.+?)\\\\?\)/g, false)
 
   // $...$ — inline math
   result = renderKatex(result, /\$([^\n$]+?)\$/g, false)
 
   return result
+}
+
+// 提取 KaTeX HTML，替换为占位符，防止 marked 破坏数学内容
+function extractKatexPlaceholders(text: string): { processed: string; restore: (s: string) => string } {
+  const placeholders: string[] = []
+  let result = text.replace(/<span class="katex">[\s\S]*?<\/span>/g, (match) => {
+    const idx = placeholders.length
+    placeholders.push(match)
+    return `__KATEX_PLACEHOLDER_${idx}__`
+  })
+  return {
+    processed: result,
+    restore: (s: string) => s.replace(/__KATEX_PLACEHOLDER_(\d+)__/g, (_, idx) => placeholders[Number(idx)] || ''),
+  }
 }
 
 const DEBOUNCE_MS = 80
@@ -107,13 +123,16 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     if (!ref.current) return
     const deduped = removeDuplicateFormulas(text)
     const withMath = renderMath(deduped)
-    const result = marked.parse(withMath)
+    // 提取 KaTeX HTML 避免 marked 破坏数学内容
+    const { processed, restore } = extractKatexPlaceholders(withMath)
+    const result = marked.parse(processed)
 
     const render = (html: string) => {
       if (!ref.current) return
-      const finalHtml = DOMPurify.sanitize(html, {
-        ADD_ATTR: ['class', 'aria-hidden'],
-        ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mtext', 'msqrt', 'mstyle', 'annotation', 'mglyph', 'mspace'],
+      const restored = restore(html)
+      const finalHtml = DOMPurify.sanitize(restored, {
+        ADD_ATTR: ['class', 'aria-hidden', 'encoding'],
+        ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mtext', 'msqrt', 'mstyle', 'annotation', 'mspace'],
       })
       if (ref.current.innerHTML !== finalHtml) {
         ref.current.innerHTML = finalHtml

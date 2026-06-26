@@ -35,7 +35,16 @@ export default class ErrorBoundary extends Component<Props, State> {
             <h2 className="text-lg font-medium text-gray-800 mb-2">页面出错了</h2>
             <p className="text-sm text-gray-500 mb-4">{this.state.error?.message || '未知错误'}</p>
             <button
-              onClick={() => {
+              onClick={async () => {
+                // 重新加载前先持久化数据
+                try {
+                  const { useAiStore } = await import('../../stores/aiStore')
+                  const { useNoteStore } = await import('../../stores/noteStore')
+                  const { useSettingsStore } = await import('../../stores/settingsStore')
+                  useAiStore.getState().saveToStorage()
+                  useNoteStore.getState().saveToStorage()
+                  useSettingsStore.getState().saveToStorage()
+                } catch { /* best effort */ }
                 this.setState({ hasError: false, error: null })
                 window.location.reload()
               }}

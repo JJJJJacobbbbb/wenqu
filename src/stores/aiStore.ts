@@ -410,11 +410,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       let done = false
       let dataLines: string[] = []
 
+      let lastStreamUpdate = 0
+      const STREAM_THROTTLE_MS = 50
       const updateStreamState = () => {
+        const now = Date.now()
+        if (now - lastStreamUpdate < STREAM_THROTTLE_MS) return
+        lastStreamUpdate = now
         set((state) => {
           const s = state.sessions[activeSessionId!]
           if (!s) return state
-          // 如果正在思考中且还没开始流式输出，更新状态
           const newStatus = fullThinkingText && !fullText ? '正在深入思考...' : (fullText ? '' : s.statusText)
           return {
             sessions: {
@@ -690,6 +694,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         set({
           sessions,
           activeSessionId: loadedActiveId && sessions[loadedActiveId] ? loadedActiveId : null,
+          thinkingMode: !!parsed.thinkingMode,
         })
       }
     } catch (e) {
@@ -717,9 +722,29 @@ export const useAiStore = create<AiState>((set, get) => ({
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
         sessions: saveableSessions,
         activeSessionId,
+        thinkingMode: get().thinkingMode,
       }))
     } catch (e) {
-      logger.error('保存会话失败', e)
+      // QuotaExceededError: localStorage 满，尝试清理旧会话
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        logger.error('localStorage 空间不足，尝试清理旧会话')
+        window.dispatchEvent(new CustomEvent('storage-warning', { detail: '存储空间不足，已自动清理最早的会话' }))
+        try {
+          const { sessions, activeSessionId } = get()
+          const sorted = Object.values(sessions).sort((a, b) => a.updatedAt - b.updatedAt)
+          // 删除最旧的会话直到数量减半
+          const toRemove = sorted.slice(0, Math.ceil(sorted.length / 2))
+          const newSessions = { ...sessions }
+          for (const s of toRemove) {
+            if (s.id !== activeSessionId) delete newSessions[s.id]
+          }
+          set({ sessions: newSessions })
+          // 重试保存
+          get().saveToStorage()
+        } catch { /* give up */ }
+      } else {
+        logger.error('保存会话失败', e)
+      }
     }
   },
 }))

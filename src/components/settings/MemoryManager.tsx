@@ -48,10 +48,10 @@ export default function MemoryManager() {
       title: '删除科目',
       message: '确定删除此科目？将同时删除该科目下所有会话和笔记。',
       onConfirm: () => {
-        const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
-        subjectSessions.forEach((s) => deleteSession(s.id))
-        const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
-        subjectNotes.forEach((n) => removeNote(n.id))
+        const { sessions: curSessions } = useAiStore.getState()
+        const { notes: curNotes } = useNoteStore.getState()
+        Object.values(curSessions).filter((s) => s.subjectId === subjectId).forEach((s) => deleteSession(s.id))
+        curNotes.filter((n) => n.subjectId === subjectId).forEach((n) => removeNote(n.id))
         removeSubject(subjectId)
         if (selectedSubjectId === subjectId) setSelectedSubjectId(null)
         setConfirmDialog(null)
@@ -64,8 +64,8 @@ export default function MemoryManager() {
       title: '清空会话',
       message: '确定清空此科目所有会话？',
       onConfirm: () => {
-        const subjectSessions = Object.values(sessions).filter((s) => s.subjectId === subjectId)
-        subjectSessions.forEach((s) => deleteSession(s.id))
+        const { sessions: curSessions } = useAiStore.getState()
+        Object.values(curSessions).filter((s) => s.subjectId === subjectId).forEach((s) => deleteSession(s.id))
         setConfirmDialog(null)
       },
     })
@@ -76,8 +76,8 @@ export default function MemoryManager() {
       title: '清空笔记',
       message: '确定清空此科目所有笔记？',
       onConfirm: () => {
-        const subjectNotes = notes.filter((n) => n.subjectId === subjectId)
-        subjectNotes.forEach((n) => removeNote(n.id))
+        const { notes: curNotes } = useNoteStore.getState()
+        curNotes.filter((n) => n.subjectId === subjectId).forEach((n) => removeNote(n.id))
         setConfirmDialog(null)
       },
     })

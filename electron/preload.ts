@@ -37,10 +37,25 @@ const ALLOWED_ON_CHANNELS = [
   'navigate-to',
 ]
 
+// IPC 参数最大 10MB（防止恶意渲染进程发送超大 payload）
+const MAX_IPC_ARGS_SIZE = 10 * 1024 * 1024
+
+function checkArgsSize(args: unknown[]): boolean {
+  try {
+    const json = JSON.stringify(args)
+    return json.length <= MAX_IPC_ARGS_SIZE
+  } catch {
+    return false
+  }
+}
+
 contextBridge.exposeInMainWorld('desktopHost', {
   invoke: (channel: string, ...args: unknown[]) => {
     if (!ALLOWED_INVOKE_CHANNELS.includes(channel)) {
       return Promise.reject(new Error(`Blocked IPC invoke on channel: ${channel}`))
+    }
+    if (!checkArgsSize(args)) {
+      return Promise.reject(new Error('IPC payload too large'))
     }
     return ipcRenderer.invoke(channel, ...args)
   },

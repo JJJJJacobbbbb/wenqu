@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useAiStore } from '../../stores/aiStore'
@@ -16,7 +16,13 @@ import WinControls from '../shared/WinControls'
 const PdfViewer = lazy(() => import('./PdfViewer'))
 
 export default function DocumentViewer() {
-  const { tabs, activeTabId, closeTab, setActiveTab, getActiveDocument, openFile, selectionMode } = useDocumentStore()
+  const tabs = useDocumentStore((s) => s.tabs)
+  const activeTabId = useDocumentStore((s) => s.activeTabId)
+  const closeTab = useDocumentStore((s) => s.closeTab)
+  const setActiveTab = useDocumentStore((s) => s.setActiveTab)
+  const getActiveDocument = useDocumentStore((s) => s.getActiveDocument)
+  const openFile = useDocumentStore((s) => s.openFile)
+  const selectionMode = useDocumentStore((s) => s.selectionMode)
   const { openSettings, openNotes } = useTabStore()
 
   const activeDocument = getActiveDocument()
@@ -24,10 +30,13 @@ export default function DocumentViewer() {
 
   // 框选状态
   const [isSelecting, setIsSelecting] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const [selStart, setSelStart] = useState<{ x: number; y: number } | null>(null)
   const [selEnd, setSelEnd] = useState<{ x: number; y: number } | null>(null)
   const docAreaRef = useRef<HTMLDivElement>(null)
+  const contentAreaRef = useRef<HTMLDivElement>(null)
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map())
   const DRAG_THRESHOLD = 5
 
   // 左键按下：记录起点（仅在框选模式下）
@@ -80,22 +89,27 @@ export default function DocumentViewer() {
     const selH = Math.abs(end.y - start.y)
     if (selW < MIN_SELECTION_SIZE || selH < MIN_SELECTION_SIZE) return
 
-    const host = getDesktopHost()
-    const croppedData = await host.invoke('desktop:screenshot:crop-selection', {
-      viewportX: Math.min(start.x, end.x),
-      viewportY: Math.min(start.y, end.y),
-      width: selW,
-      height: selH,
-    })
+    try {
+      const host = getDesktopHost()
+      const croppedData = await host.invoke('desktop:screenshot:crop-selection', {
+        viewportX: Math.min(start.x, end.x),
+        viewportY: Math.min(start.y, end.y),
+        width: selW,
+        height: selH,
+      })
 
-    if (typeof croppedData === 'string' && croppedData) {
-      useAiStore.getState().addPendingScreenshot(croppedData)
+      if (typeof croppedData === 'string' && croppedData) {
+        useAiStore.getState().addPendingScreenshot(croppedData)
+      }
+    } catch (err) {
+      logger.error('截图裁剪失败', err)
     }
   }, [])
 
   // 右键取消框选
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
+    mouseDownPosRef.current = null
     if (isSelectingRef.current) {
       setIsSelecting(false)
       setSelStart(null)
@@ -138,6 +152,45 @@ export default function DocumentViewer() {
 
     return () => { cleanup?.() }
   }, [openFile])
+
+  // 保存/恢复标签页滚动位置
+  useEffect(() => {
+    const el = contentAreaRef.current
+    if (!el) return
+    const onScroll = (e: Event) => {
+      const target = e.target as HTMLElement
+      if (target !== el && target.scrollHeight > target.clientHeight) {
+        scrollPositionsRef.current.set(activeTabId || '', target.scrollTop)
+      }
+    }
+    el.addEventListener('scroll', onScroll, true)
+    return () => el.removeEventListener('scroll', onScroll, true)
+  }, [activeTabId])
+
+  // 切换标签后恢复滚动位置
+  const prevTabIdRef = useRef(activeTabId)
+  useEffect(() => {
+    if (prevTabIdRef.current === activeTabId) return
+    prevTabIdRef.current = activeTabId
+    const saved = scrollPositionsRef.current.get(activeTabId || '')
+    if (saved == null) return
+    requestAnimationFrame(() => {
+      const el = contentAreaRef.current
+      if (!el) return
+      const scrollable = el.querySelector('[data-scrollable]') || el.querySelector('.overflow-auto, .overflow-y-auto')
+      if (scrollable) scrollable.scrollTop = saved
+    })
+  }, [activeTabId])
+
+  const handleSetActiveTab = useCallback((tabId: string) => {
+    // 保存当前滚动位置
+    const el = contentAreaRef.current
+    if (el) {
+      const scrollable = el.querySelector('[data-scrollable]') || el.querySelector('.overflow-auto, .overflow-y-auto')
+      if (scrollable) scrollPositionsRef.current.set(activeTabId || '', scrollable.scrollTop)
+    }
+    setActiveTab(tabId)
+  }, [activeTabId, setActiveTab])
 
   const handleOpenFile = useCallback(() => {
     const input = document.createElement('input')
@@ -207,10 +260,10 @@ export default function DocumentViewer() {
     }
   }
 
-  const host = getDesktopHost()
+  const host = useMemo(() => getDesktopHost(), [])
 
   return (
-    <div className="h-screen flex flex-col relative">
+    <div className="h-full flex flex-col relative">
       <header
         className="h-10 bg-white border-b border-gray-200 flex items-center pl-4 justify-between shrink-0 select-none"
         style={dragRegion}
@@ -265,26 +318,38 @@ export default function DocumentViewer() {
           ref={docAreaRef}
           className={`flex-1 min-w-0 flex flex-col border-r border-gray-200 relative ${selectionMode ? 'selection-mode' : ''}`}
           onContextMenu={handleContextMenu}
-          onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true) }}
+          onDragLeave={() => setIsDragOver(false)}
           onDrop={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            setIsDragOver(false)
             const files = Array.from(e.dataTransfer.files)
             useDocumentStore.getState().addLocalFiles(files)
           }}
         >
+          {/* 拖拽悬停遮罩 */}
+          {isDragOver && (
+            <div className="absolute inset-0 z-40 bg-blue-500/10 border-2 border-dashed border-blue-400 flex items-center justify-center pointer-events-none">
+              <div className="bg-white/90 rounded-lg px-6 py-3 shadow-lg text-blue-600 font-medium text-sm">
+                释放以打开文件
+              </div>
+            </div>
+          )}
+
           {/* 标签栏 - 阻止框选事件冒泡 */}
           <div onMouseDown={(e) => e.stopPropagation()}>
             <DocumentTabs
               tabs={tabs}
               activeTabId={activeTabId}
-              onSelect={setActiveTab}
+              onSelect={handleSetActiveTab}
               onClose={closeTab}
             />
           </div>
 
           {/* 内容区域 - 框选只在此区域内生效 */}
           <div
+            ref={contentAreaRef}
             className={`flex-1 flex flex-col relative min-h-0 ${selectionMode ? 'selection-mode' : ''}`}
             onMouseDown={activeDocument ? handleMouseDown : undefined}
           >

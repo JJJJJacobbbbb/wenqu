@@ -45,7 +45,7 @@ function validateFilePath(filePath: string): string {
   if (/^\\\\[.?]/.test(filePath)) throw new Error('Access to device path is blocked')
   let resolved = path.resolve(filePath)
   // 解析符号链接，防止 symlink 绕过路径检查
-  try { resolved = fs.realpathSync(resolved) } catch { /* path doesn't exist yet, use resolved */ }
+  try { resolved = realpathSync(resolved) } catch { /* path doesn't exist yet, use resolved */ }
   const basename = path.basename(resolved).split('.')[0].toUpperCase()
   const reserved = ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9']
   if (reserved.includes(basename)) throw new Error('Access to reserved device name is blocked')
@@ -111,6 +111,11 @@ function createMainWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
+  })
+
+  // 拦截 window.open，阻止渲染进程创建不受控的新窗口
+  mainWindow.webContents.setWindowOpenHandler(() => {
+    return { action: 'deny' }
   })
 
   mainWindow.on('closed', () => {
@@ -625,11 +630,6 @@ app.whenReady().then(() => {
         'X-Content-Type-Options': ['nosniff'],
       },
     })
-  })
-
-  // 拦截 window.open，阻止渲染进程创建不受控的新窗口
-  session.defaultSession.setWindowOpenHandler(() => {
-    return { action: 'deny' }
   })
 
   // 拒绝所有权限请求（摄像头、麦克风、地理位置等）
